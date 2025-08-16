@@ -152,13 +152,20 @@ mod tests {
 
     #[test]
     fn parse_stmt() {
-        node!(G, G1, G2);
+        node!(G, H, G1, G2);
         enode!(A, B, C, D);
 
         assert_eq!(stmts().parse("").into_result(), Ok(vec![]),);
         assert_eq!(
             stmts().parse("G = {A, B}").into_result(),
             Ok(vec![Stmt::Assign(G, Expr::Connected(vec![A, B]))]),
+        );
+        assert_eq!(
+            stmts().parse("G = {A, B}H = [C, D]").into_result(),
+            Ok(vec![
+                Stmt::Assign(G, Expr::Connected(vec![A, B])),
+                Stmt::Assign(H, Expr::Disconnected(vec![C, D])),
+            ]),
         );
         assert_eq!(
             stmts()
