@@ -1,4 +1,4 @@
-use chumsky::{prelude::*, text::newline};
+use chumsky::prelude::*;
 
 /// Nodes used as base indentifiers or to refer to other graphs.
 ///
@@ -21,9 +21,10 @@ pub enum Expr<'src> {
     Node(Node<'src>),
     Connected(Vec<Expr<'src>>),
     Disconnected(Vec<Expr<'src>>),
+    Stmts(Vec<Stmt<'src>>, Box<Expr<'src>>),
 }
 
-pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
+pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> + Clone {
     recursive(|expr| {
         let node = node().map(Expr::Node);
 
@@ -43,7 +44,7 @@ pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
             .delimited_by(just('['), just(']'))
             .map(Expr::Disconnected);
 
-        choice((node, connected, disconnected))
+        choice((node, connected, disconnected)).padded()
     })
 }
 
@@ -59,14 +60,30 @@ pub enum Stmt<'src> {
     Assign(Node<'src>, Expr<'src>),
 }
 
-pub fn stmt<'src>() -> impl Parser<'src, &'src str, Vec<Stmt<'src>>> {
+pub fn stmts<'src>() -> impl Parser<'src, &'src str, Vec<Stmt<'src>>> + Clone {
     node()
         .then(just("=").padded())
         .then(expr())
         .map(|((n, _), e)| Stmt::Assign(n, e))
-        .separated_by(newline())
+        .separated_by(text::whitespace())
         .collect::<Vec<_>>()
-        .padded()
+}
+
+/// Returns are a sequence of statements followed by a final graph expression.
+///
+/// ```grapl
+/// G = {A, B}
+/// {G, [C, D]}
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ret<'src>(Vec<Stmt<'src>>, Expr<'src>);
+
+pub fn ret<'src>() -> impl Parser<'src, &'src str, Ret<'src>> + Clone {
+    // stmts()
+    //     .then(newline())
+    //     .then(expr())
+    //     .map(|((s, _), e)| Ret(s, e))
+    stmts().then(expr()).map(|(s, e)| Ret(s, e))
 }
 
 #[cfg(test)]
@@ -115,6 +132,16 @@ mod tests {
             Ok(Expr::Disconnected(vec![A, B]))
         );
         assert_eq!(
+            expr()
+                .parse(
+                    r#"
+                        {A, [B, C]}
+                "#
+                )
+                .into_result(),
+            Ok(Expr::Connected(vec![A, Expr::Disconnected(vec![B, C])]))
+        );
+        assert_eq!(
             expr().parse("[{A,B},[C, D]]").into_result(),
             Ok(Expr::Disconnected(vec![
                 Expr::Connected(vec![A, B]),
@@ -128,12 +155,13 @@ mod tests {
         node!(G, G1, G2);
         enode!(A, B, C, D);
 
+        assert_eq!(stmts().parse("").into_result(), Ok(vec![]),);
         assert_eq!(
-            stmt().parse("G = {A, B}").into_result(),
+            stmts().parse("G = {A, B}").into_result(),
             Ok(vec![Stmt::Assign(G, Expr::Connected(vec![A, B]))]),
         );
         assert_eq!(
-            stmt()
+            stmts()
                 .parse(
                     r#"
                         G1 = {A, B}
@@ -149,6 +177,60 @@ mod tests {
                     Expr::Connected(vec![Expr::Disconnected(vec![Expr::Node(G1), C]), D])
                 ),
             ]),
+        );
+    }
+
+    #[test]
+    fn parse_ret() {
+        node!(G);
+        enode!(A, B, C, D);
+
+        assert_eq!(
+            ret().parse("{A, [C, D]}").into_result(),
+            Ok(Ret(
+                vec![],
+                Expr::Connected(vec![A, Expr::Disconnected(vec![C, D])]),
+            ))
+        );
+
+        assert_eq!(
+            ret().parse("G = {A, [C, D]} {G, B}").into_result(),
+            Ok(Ret(
+                vec![Stmt::Assign(
+                    G,
+                    Expr::Connected(vec![A, Expr::Disconnected(vec![C, D])])
+                )],
+                Expr::Connected(vec![Expr::Node(G), B]),
+            ))
+        );
+
+        assert_eq!(
+            expr()
+                .parse(
+                    r#"
+                        {G, [C, D]}
+                "#
+                )
+                .into_result(),
+            Ok(Expr::Connected(vec![
+                Expr::Node(G),
+                Expr::Disconnected(vec![C, D])
+            ]))
+        );
+
+        assert_eq!(
+            ret()
+                .parse(
+                    r#"
+                        G = {A, B}
+                        {G, [C, D]}
+                "#
+                )
+                .into_result(),
+            Ok(Ret(
+                vec![Stmt::Assign(G, Expr::Connected(vec![A, B]))],
+                Expr::Connected(vec![Expr::Node(G), Expr::Disconnected(vec![C, D])]),
+            ))
         );
     }
 }
