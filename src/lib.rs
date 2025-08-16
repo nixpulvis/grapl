@@ -1,19 +1,31 @@
-use chumsky::prelude::*;
+use chumsky::{prelude::*, text::newline};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Node<'src>(&'src str);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr<'src> {
-    Node(&'src str),
+    Node(Node<'src>),
     Connected(Vec<Expr<'src>>),
     Disconnected(Vec<Expr<'src>>),
 }
 
-pub fn parse<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Stmt<'src> {
+    Assign(Node<'src>, Expr<'src>),
+}
+
+pub fn node<'src>() -> impl Parser<'src, &'src str, Node<'src>> + Clone {
+    text::ascii::ident().padded().map(Node)
+}
+
+pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
     recursive(|expr| {
-        let ident = text::ascii::ident().padded().map(Expr::Node);
+        let node = node().map(Expr::Node);
 
         let seq = expr
             .clone()
-            .separated_by(just(","))
+            .separated_by(just(",").padded())
             .allow_trailing()
             .collect::<Vec<_>>();
 
@@ -27,39 +39,100 @@ pub fn parse<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
             .delimited_by(just('['), just(']'))
             .map(Expr::Disconnected);
 
-        let graph = connected.or(disconnected);
-
-        ident.or(graph)
+        choice((node, connected, disconnected))
     })
+}
+
+pub fn stmt<'src>() -> impl Parser<'src, &'src str, Vec<Stmt<'src>>> {
+    node()
+        .then(just("=").padded())
+        .then(expr())
+        .map(|((n, _), e)| Stmt::Assign(n, e))
+        .separated_by(newline())
+        .collect::<Vec<_>>()
+        .padded()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
-        const A: Expr<'static> = Expr::Node("A");
-        const B: Expr<'static> = Expr::Node("B");
-        const C: Expr<'static> = Expr::Node("C");
-        const D: Expr<'static> = Expr::Node("D");
+    macro_rules! node {
+        ($($id:ident),*) => {
+            $(const $id: Node<'static> = Node(stringify!($id));)*
+        };
+    }
 
-        assert!(parse().parse("").has_errors());
-        assert_eq!(parse().parse("A").into_result(), Ok(A));
+    #[test]
+    fn parse_node() {
+        node!(A);
+
+        assert!(node().parse("").has_errors());
+        assert!(node().parse("1").has_errors());
+        assert_eq!(node().parse("A").into_result(), Ok(A));
+    }
+
+    macro_rules! enode {
+        ($($id:ident),*) => {
+            $(const $id: Expr<'static> = Expr::Node(Node(stringify!($id)));)*
+        };
+    }
+
+    #[test]
+    fn parse_expr() {
+        enode!(A, B, C, D);
+
         assert_eq!(
-            parse().parse("{A}").into_result(),
+            expr().parse("{}").into_result(),
+            Ok(Expr::Connected(vec![]))
+        );
+        assert_eq!(
+            expr().parse("[]").into_result(),
+            Ok(Expr::Disconnected(vec![]))
+        );
+        assert_eq!(
+            expr().parse("{  A }").into_result(),
             Ok(Expr::Connected(vec![A]))
         );
         assert_eq!(
-            parse().parse("[A,B,]").into_result(),
+            expr().parse("[A,  B,  ]").into_result(),
             Ok(Expr::Disconnected(vec![A, B]))
         );
         assert_eq!(
-            parse().parse("[{A,B},[C, D]]").into_result(),
+            expr().parse("[{A,B},[C, D]]").into_result(),
             Ok(Expr::Disconnected(vec![
                 Expr::Connected(vec![A, B]),
                 Expr::Disconnected(vec![C, D])
             ]))
+        );
+    }
+
+    #[test]
+    fn parse_stmt() {
+        node!(G, G1, G2);
+        enode!(A, B, C, D);
+
+        assert_eq!(
+            stmt().parse("G = {A, B}").into_result(),
+            Ok(vec![Stmt::Assign(G, Expr::Connected(vec![A, B]))]),
+        );
+        assert_eq!(
+            stmt()
+                .parse(
+                    r#"
+                        G1 = {A, B}
+
+                        G2 = {[G1, C], D}
+                "#
+                )
+                .into_result(),
+            Ok(vec![
+                Stmt::Assign(G1, Expr::Connected(vec![A, B])),
+                Stmt::Assign(
+                    G2,
+                    Expr::Connected(vec![Expr::Disconnected(vec![Expr::Node(G1), C]), D])
+                ),
+            ]),
         );
     }
 }
