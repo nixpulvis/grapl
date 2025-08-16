@@ -1,22 +1,26 @@
 use chumsky::{prelude::*, text::newline};
 
+/// Nodes used as base indentifiers or to refer to other graphs.
+///
+/// Examples of nodes: `A`, `a`, `G1`...
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node<'src>(&'src str);
 
+pub fn node<'src>() -> impl Parser<'src, &'src str, Node<'src>> + Clone {
+    text::ascii::ident().padded().map(Node)
+}
+
+/// Expressions describe a graph.
+///
+/// ```grapl
+/// { A, B }
+/// { A, [B, C] }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr<'src> {
     Node(Node<'src>),
     Connected(Vec<Expr<'src>>),
     Disconnected(Vec<Expr<'src>>),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Stmt<'src> {
-    Assign(Node<'src>, Expr<'src>),
-}
-
-pub fn node<'src>() -> impl Parser<'src, &'src str, Node<'src>> + Clone {
-    text::ascii::ident().padded().map(Node)
 }
 
 pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
@@ -41,6 +45,18 @@ pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> {
 
         choice((node, connected, disconnected))
     })
+}
+
+/// Statements are a sequence of graph assignments for nested use.
+///
+/// ```grapl
+/// G1 = {A, B}
+/// G2 = [C, D]
+/// G  = {G1, G2}
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Stmt<'src> {
+    Assign(Node<'src>, Expr<'src>),
 }
 
 pub fn stmt<'src>() -> impl Parser<'src, &'src str, Vec<Stmt<'src>>> {
