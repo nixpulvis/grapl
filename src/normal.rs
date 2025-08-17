@@ -139,106 +139,115 @@ impl<'src> Normalize for Ret<'src> {
 #[cfg(test)]
 mod tests {
     use super::Normalize;
-    use crate::{expr, ret, stmts};
+    use crate::{Expr, Ret, Stmt};
     use chumsky::Parser;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn normalize_node() {
         assert_eq!(
-            expr().parse("A").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("A").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
         assert_eq!(
-            expr().parse("A").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("A").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
     }
 
     #[test]
     fn normalize_empty_expr() {
         assert_eq!(
-            expr().parse("[]").unwrap().normalize(),
-            expr().parse("[]").unwrap(),
+            Expr::parser().parse("[]").unwrap().normalize(),
+            Expr::parser().parse("[]").unwrap(),
         );
         assert_eq!(
-            expr().parse("{}").unwrap().normalize(),
-            expr().parse("[]").unwrap(),
+            Expr::parser().parse("{}").unwrap().normalize(),
+            Expr::parser().parse("[]").unwrap(),
         );
     }
 
     #[test]
     fn normalize_nested_expr() {
         assert_eq!(
-            expr().parse("{A}").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("{A}").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
         assert_eq!(
-            expr().parse("{{A}}").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("{{A}}").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
         assert_eq!(
-            expr().parse("[A]").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("[A]").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
         assert_eq!(
-            expr().parse("[[A]]").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("[[A]]").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
         assert_eq!(
-            expr().parse("{[A]}").unwrap().normalize(),
-            expr().parse("A").unwrap(),
+            Expr::parser().parse("{[A]}").unwrap().normalize(),
+            Expr::parser().parse("A").unwrap(),
         );
         assert_eq!(
-            expr().parse("[A, [{B, C}], D]").unwrap().normalize(),
-            expr().parse("[A, {B, C}, D]").unwrap(),
+            Expr::parser()
+                .parse("[A, [{B, C}], D]")
+                .unwrap()
+                .normalize(),
+            Expr::parser().parse("[A, {B, C}, D]").unwrap(),
         );
         assert_eq!(
-            expr().parse("[A, [B, C], D]").unwrap().normalize(),
-            expr().parse("[A, B, C, D]").unwrap(),
+            Expr::parser().parse("[A, [B, C], D]").unwrap().normalize(),
+            Expr::parser().parse("[A, B, C, D]").unwrap(),
         );
     }
 
     #[test]
     fn normalize_expr() {
         assert_eq!(
-            expr().parse("{A, [B]}").unwrap().normalize(),
-            expr().parse("{A, B}").unwrap(),
+            Expr::parser().parse("{A, [B]}").unwrap().normalize(),
+            Expr::parser().parse("{A, B}").unwrap(),
         );
         assert_eq!(
-            expr().parse("[A, {B}]").unwrap().normalize(),
-            expr().parse("[A, B]").unwrap(),
-        );
-
-        assert_eq!(
-            expr().parse("{A, [B, C]}").unwrap().normalize(),
-            expr().parse("[{A, B}, {A, C}]").unwrap(),
-        );
-        assert_eq!(
-            expr().parse("{{A, B}, [C, D]}").unwrap().normalize(),
-            expr().parse("[{A, B, C}, {A, B, D}]").unwrap(),
+            Expr::parser().parse("[A, {B}]").unwrap().normalize(),
+            Expr::parser().parse("[A, B]").unwrap(),
         );
 
         assert_eq!(
-            expr().parse("{A, [B, C], D}").unwrap().normalize(),
-            expr().parse("[{A, B, D}, {A, C, D}]").unwrap(),
+            Expr::parser().parse("{A, [B, C]}").unwrap().normalize(),
+            Expr::parser().parse("[{A, B}, {A, C}]").unwrap(),
         );
         assert_eq!(
-            expr().parse("[A, {B, C}, D]").unwrap().normalize(),
-            expr().parse("[A, {B, C}, D]").unwrap(),
-        );
-
-        assert_eq!(
-            expr().parse("{A, [{B, C}, D], E}").unwrap().normalize(),
-            expr().parse("[{A, B, C, E}, {A, D, E}]").unwrap(),
+            Expr::parser()
+                .parse("{{A, B}, [C, D]}")
+                .unwrap()
+                .normalize(),
+            Expr::parser().parse("[{A, B, C}, {A, B, D}]").unwrap(),
         );
 
         assert_eq!(
-            expr()
+            Expr::parser().parse("{A, [B, C], D}").unwrap().normalize(),
+            Expr::parser().parse("[{A, B, D}, {A, C, D}]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parser().parse("[A, {B, C}, D]").unwrap().normalize(),
+            Expr::parser().parse("[A, {B, C}, D]").unwrap(),
+        );
+
+        assert_eq!(
+            Expr::parser()
+                .parse("{A, [{B, C}, D], E}")
+                .unwrap()
+                .normalize(),
+            Expr::parser().parse("[{A, B, C, E}, {A, D, E}]").unwrap(),
+        );
+
+        assert_eq!(
+            Expr::parser()
                 .parse("{A, [{B, C}, D], E, [F, G]}")
                 .unwrap()
                 .normalize(),
-            expr()
+            Expr::parser()
                 .parse(
                     "[
                     {A, B, C, E, F},
@@ -254,7 +263,7 @@ mod tests {
     #[test]
     fn normalize_disjoint_stmts() {
         assert_eq!(
-            stmts()
+            Stmt::parser()
                 .parse(
                     r#"
                     G1 = {A, [B, C]}
@@ -265,7 +274,7 @@ mod tests {
                 .iter()
                 .map(Normalize::normalize)
                 .collect::<Vec<_>>(),
-            stmts()
+            Stmt::parser()
                 .parse(
                     r#"
                     G1 = [{A, B}, {A, C}]
@@ -278,9 +287,9 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn normalize_referent_stmts() {
+    fn normalize_referent_stmt() {
         assert_eq!(
-            stmts()
+            Stmt::parser()
                 .parse(
                     r#"
                     G1 = [A, B]
@@ -291,7 +300,7 @@ mod tests {
                 .iter()
                 .map(Normalize::normalize)
                 .collect::<Vec<_>>(),
-            stmts()
+            Stmt::parser()
                 .parse(
                     r#"
                     G1 = [A, B]
@@ -302,7 +311,7 @@ mod tests {
         );
         // TODO: Consider this case a little more.
         assert_eq!(
-            stmts()
+            Stmt::parser()
                 .parse(
                     r#"
                     G1 = G2
@@ -313,7 +322,7 @@ mod tests {
                 .iter()
                 .map(Normalize::normalize)
                 .collect::<Vec<_>>(),
-            stmts()
+            Stmt::parser()
                 .parse(
                     r#"
                     G1 = G2
@@ -327,7 +336,7 @@ mod tests {
     #[test]
     fn normalize_ret() {
         assert_eq!(
-            ret()
+            Ret::parser()
                 .parse(
                     r#"
                     G1 = {A, [B, C]}
@@ -336,7 +345,7 @@ mod tests {
                 )
                 .unwrap()
                 .normalize(),
-            ret()
+            Ret::parser()
                 .parse(
                     r#"
                     G1 = [{A, B}, {A, C}]
