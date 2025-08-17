@@ -1,5 +1,16 @@
 use crate::{Expr, Ret, Stmt};
 
+/// Reductions to normal form.
+///
+/// - Empty graphs are fully disconnected: `{} => []`
+/// - Single node graphs are just the node: `[{A}] => A`
+/// - Fully connected graphs are flattened: `{{A, B}, C} => {A, B, C}`
+/// - Normalized graphs with disconnected expressions all collapse into a single
+///   fully disconnected expression:
+/// ```
+/// {[A, B], [C, D]} =>
+/// [{A, C}, {A, D}, {B, C}, {B, D}]
+/// ```
 pub trait Normalize {
     fn normalize(&self) -> Self;
 }
