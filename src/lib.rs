@@ -12,6 +12,12 @@ impl<'src> Node<'src> {
     }
 }
 
+impl<'src> std::fmt::Display for Node<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Expressions describe a graph.
 ///
 /// ```grapl
@@ -51,7 +57,24 @@ impl<'src> Expr<'src> {
     }
 }
 
-/// Statements are a sequence of graph assignments for nested use.
+impl<'src> std::fmt::Display for Expr<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let joined = |exprs: &[Expr]| {
+            exprs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match self.normalize() {
+            Expr::Node(node) => write!(f, "{}", node),
+            Expr::Connected(exprs) => write!(f, "{{{}}}", joined(&exprs)),
+            Expr::Disconnected(exprs) => write!(f, "[{}]", joined(&exprs)),
+        }
+    }
+}
+
+/// A statement is part of a sequence used to resolve other statements.
 ///
 /// ```grapl
 /// G1 = {A, B}
@@ -74,6 +97,14 @@ impl<'src> Stmt<'src> {
     }
 }
 
+impl<'src> std::fmt::Display for Stmt<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.normalize() {
+            Stmt::Assign(node, expr) => write!(f, "{} = {}", node, expr),
+        }
+    }
+}
+
 /// Returns are a sequence of statements followed by a final graph expression.
 ///
 /// ```grapl
@@ -86,6 +117,19 @@ pub struct Ret<'src>(Vec<Stmt<'src>>, Expr<'src>);
 impl<'src> Ret<'src> {
     pub fn parser() -> impl Parser<'src, &'src str, Ret<'src>> + Clone {
         Stmt::parser().then(Expr::parser()).map(|(s, e)| Ret(s, e))
+    }
+}
+
+impl<'src> std::fmt::Display for Ret<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let joined = |exprs: &[Stmt]| {
+            exprs
+                .iter()
+                .map(|e| e.normalize().to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        write!(f, "{}\n{}", joined(&self.0), self.1.normalize())
     }
 }
 
@@ -109,6 +153,12 @@ mod tests {
         assert!(Node::parser().parse("").has_errors());
         assert!(Node::parser().parse("1").has_errors());
         assert_eq!(Node::parser().parse("A").into_result(), Ok(A));
+    }
+
+    #[test]
+    fn display_node() {
+        assert_eq!(Node::parser().parse("A").unwrap().to_string(), "A");
+        assert_eq!(Node::parser().parse("  G ").unwrap().to_string(), "G");
     }
 
     macro_rules! enode {
@@ -164,6 +214,17 @@ mod tests {
     }
 
     #[test]
+    fn display_expr() {
+        assert_eq!(
+            Expr::parser()
+                .parse("{  A, {B  ,  [C,D]}  }")
+                .unwrap()
+                .to_string(),
+            "[{A, B, C}, {A, B, D}]"
+        )
+    }
+
+    #[test]
     fn parse_stmt() {
         node!(G, H, G1, G2);
         enode!(A, B, C, D);
@@ -198,6 +259,14 @@ mod tests {
                 ),
             ]),
         );
+    }
+
+    #[test]
+    fn display_stmt() {
+        assert_eq!(
+            Stmt::parser().parse("  G={A,[B,C]}").unwrap()[0].to_string(),
+            "G = [{A, B}, {A, C}]"
+        )
     }
 
     #[test]
@@ -239,5 +308,13 @@ mod tests {
                 Expr::Connected(vec![Expr::Node(G), Expr::Disconnected(vec![C, D])]),
             ))
         );
+    }
+
+    #[test]
+    fn display_ret() {
+        assert_eq!(
+            Ret::parser().parse("  G=A B").unwrap().to_string(),
+            "G = A\nB"
+        )
     }
 }
