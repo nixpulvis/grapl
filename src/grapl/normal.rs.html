@@ -290,7 +290,7 @@
 <a href=#290 id=290 data-nosnippet>290</a>    <span class="attr">#[test]
 <a href=#291 id=291 data-nosnippet>291</a>    </span><span class="kw">fn </span>normalize_disjoint_stmts() {
 <a href=#292 id=292 data-nosnippet>292</a>        <span class="macro">assert_eq!</span>(
-<a href=#293 id=293 data-nosnippet>293</a>            Stmt::parser()
+<a href=#293 id=293 data-nosnippet>293</a>            Vec::&lt;Stmt&gt;::parser()
 <a href=#294 id=294 data-nosnippet>294</a>                .parse(
 <a href=#295 id=295 data-nosnippet>295</a>                    <span class="string">r#"
 <a href=#296 id=296 data-nosnippet>296</a>                    G1 = {A, [B, C]}
@@ -301,7 +301,7 @@
 <a href=#301 id=301 data-nosnippet>301</a>                .iter()
 <a href=#302 id=302 data-nosnippet>302</a>                .map(Normalize::normalize)
 <a href=#303 id=303 data-nosnippet>303</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#304 id=304 data-nosnippet>304</a>            Stmt::parser()
+<a href=#304 id=304 data-nosnippet>304</a>            Vec::&lt;Stmt&gt;::parser()
 <a href=#305 id=305 data-nosnippet>305</a>                .parse(
 <a href=#306 id=306 data-nosnippet>306</a>                    <span class="string">r#"
 <a href=#307 id=307 data-nosnippet>307</a>                    G1 = [{A, B}, {A, C}]
@@ -316,7 +316,7 @@
 <a href=#316 id=316 data-nosnippet>316</a>    #[ignore]
 <a href=#317 id=317 data-nosnippet>317</a>    </span><span class="kw">fn </span>normalize_referent_stmt() {
 <a href=#318 id=318 data-nosnippet>318</a>        <span class="macro">assert_eq!</span>(
-<a href=#319 id=319 data-nosnippet>319</a>            Stmt::parser()
+<a href=#319 id=319 data-nosnippet>319</a>            Vec::&lt;Stmt&gt;::parser()
 <a href=#320 id=320 data-nosnippet>320</a>                .parse(
 <a href=#321 id=321 data-nosnippet>321</a>                    <span class="string">r#"
 <a href=#322 id=322 data-nosnippet>322</a>                    G1 = [A, B]
@@ -327,7 +327,7 @@
 <a href=#327 id=327 data-nosnippet>327</a>                .iter()
 <a href=#328 id=328 data-nosnippet>328</a>                .map(Normalize::normalize)
 <a href=#329 id=329 data-nosnippet>329</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#330 id=330 data-nosnippet>330</a>            Stmt::parser()
+<a href=#330 id=330 data-nosnippet>330</a>            Vec::&lt;Stmt&gt;::parser()
 <a href=#331 id=331 data-nosnippet>331</a>                .parse(
 <a href=#332 id=332 data-nosnippet>332</a>                    <span class="string">r#"
 <a href=#333 id=333 data-nosnippet>333</a>                    G1 = [A, B]
@@ -338,7 +338,7 @@
 <a href=#338 id=338 data-nosnippet>338</a>        );
 <a href=#339 id=339 data-nosnippet>339</a>        <span class="comment">// TODO: Consider this case a little more.
 <a href=#340 id=340 data-nosnippet>340</a>        </span><span class="macro">assert_eq!</span>(
-<a href=#341 id=341 data-nosnippet>341</a>            Stmt::parser()
+<a href=#341 id=341 data-nosnippet>341</a>            Vec::&lt;Stmt&gt;::parser()
 <a href=#342 id=342 data-nosnippet>342</a>                .parse(
 <a href=#343 id=343 data-nosnippet>343</a>                    <span class="string">r#"
 <a href=#344 id=344 data-nosnippet>344</a>                    G1 = G2
@@ -349,7 +349,7 @@
 <a href=#349 id=349 data-nosnippet>349</a>                .iter()
 <a href=#350 id=350 data-nosnippet>350</a>                .map(Normalize::normalize)
 <a href=#351 id=351 data-nosnippet>351</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#352 id=352 data-nosnippet>352</a>            Stmt::parser()
+<a href=#352 id=352 data-nosnippet>352</a>            Vec::&lt;Stmt&gt;::parser()
 <a href=#353 id=353 data-nosnippet>353</a>                .parse(
 <a href=#354 id=354 data-nosnippet>354</a>                    <span class="string">r#"
 <a href=#355 id=355 data-nosnippet>355</a>                    G1 = G2
