@@ -1,13 +1,33 @@
 use chumsky::prelude::*;
 
+/// Parsing for syntax elements.
+///
+/// Use [`Parse::parser`] only if you're extending the parser in some way. You
+/// will need to depend on [`chumsky::Parser`] directly as well. Otherwise, just
+/// use [`Parse::parse`] to get a syntax element.
+pub trait Parse<'src>
+where
+    Self: Sized,
+{
+    type Output;
+
+    fn parser() -> impl Parser<'src, &'src str, Self::Output> + Clone;
+
+    fn parse(input: &'src str) -> ParseResult<Self::Output, EmptyErr> {
+        Self::parser().parse(input)
+    }
+}
+
 /// Nodes used as base indentifiers or to refer to other graphs.
 ///
 /// Examples of nodes: `A`, `a`, `G1`...
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node<'src>(&'src str);
 
-impl<'src> Node<'src> {
-    pub fn parser() -> impl Parser<'src, &'src str, Node<'src>> + Clone {
+impl<'src> Parse<'src> for Node<'src> {
+    type Output = Self;
+
+    fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         text::ascii::ident().padded().map(Node)
     }
 }
@@ -31,8 +51,10 @@ pub enum Expr<'src> {
     Disconnected(Vec<Expr<'src>>),
 }
 
-impl<'src> Expr<'src> {
-    pub fn parser() -> impl Parser<'src, &'src str, Expr<'src>> + Clone {
+impl<'src> Parse<'src> for Expr<'src> {
+    type Output = Self;
+
+    fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         recursive(|expr| {
             let node = Node::parser().map(Expr::Node);
 
@@ -86,8 +108,10 @@ pub enum Stmt<'src> {
     Assign(Node<'src>, Expr<'src>),
 }
 
-impl<'src> Stmt<'src> {
-    pub fn parser() -> impl Parser<'src, &'src str, Vec<Stmt<'src>>> + Clone {
+impl<'src> Parse<'src> for Stmt<'src> {
+    type Output = Vec<Self>;
+
+    fn parser() -> impl Parser<'src, &'src str, Vec<Self>> + Clone {
         Node::parser()
             .then(just("=").padded())
             .then(Expr::parser())
@@ -114,8 +138,10 @@ impl<'src> std::fmt::Display for Stmt<'src> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ret<'src>(Vec<Stmt<'src>>, Expr<'src>);
 
-impl<'src> Ret<'src> {
-    pub fn parser() -> impl Parser<'src, &'src str, Ret<'src>> + Clone {
+impl<'src> Parse<'src> for Ret<'src> {
+    type Output = Self;
+
+    fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         Stmt::parser().then(Expr::parser()).map(|(s, e)| Ret(s, e))
     }
 }
@@ -150,15 +176,15 @@ mod tests {
     fn parse_node() {
         node!(A);
 
-        assert!(Node::parser().parse("").has_errors());
-        assert!(Node::parser().parse("1").has_errors());
-        assert_eq!(Node::parser().parse("A").into_result(), Ok(A));
+        assert!(Node::parse("").has_errors());
+        assert!(Node::parse("1").has_errors());
+        assert_eq!(Node::parse("A").into_result(), Ok(A));
     }
 
     #[test]
     fn display_node() {
-        assert_eq!(Node::parser().parse("A").unwrap().to_string(), "A");
-        assert_eq!(Node::parser().parse("  G ").unwrap().to_string(), "G");
+        assert_eq!(Node::parse("A").unwrap().to_string(), "A");
+        assert_eq!(Node::parse("  G ").unwrap().to_string(), "G");
     }
 
     macro_rules! enode {
@@ -171,20 +197,17 @@ mod tests {
     fn parse_expr() {
         enode!(A, B, C, D);
 
+        assert_eq!(Expr::parse("{}").into_result(), Ok(Expr::Connected(vec![])));
         assert_eq!(
-            Expr::parser().parse("{}").into_result(),
-            Ok(Expr::Connected(vec![]))
-        );
-        assert_eq!(
-            Expr::parser().parse("[]").into_result(),
+            Expr::parse("[]").into_result(),
             Ok(Expr::Disconnected(vec![]))
         );
         assert_eq!(
-            Expr::parser().parse("{  A }").into_result(),
+            Expr::parse("{  A }").into_result(),
             Ok(Expr::Connected(vec![A]))
         );
         assert_eq!(
-            Expr::parser().parse("[A,  B,  ]").into_result(),
+            Expr::parse("[A,  B,  ]").into_result(),
             Ok(Expr::Disconnected(vec![A, B]))
         );
         assert_eq!(
@@ -198,14 +221,14 @@ mod tests {
             Ok(Expr::Connected(vec![A, Expr::Disconnected(vec![B, C])]))
         );
         assert_eq!(
-            Expr::parser().parse("[{A,B},[C, D]]").into_result(),
+            Expr::parse("[{A,B},[C, D]]").into_result(),
             Ok(Expr::Disconnected(vec![
                 Expr::Connected(vec![A, B]),
                 Expr::Disconnected(vec![C, D])
             ]))
         );
         assert_eq!(
-            Expr::parser().parse("{{A, B}, [C, D]}").into_result(),
+            Expr::parse("{{A, B}, [C, D]}").into_result(),
             Ok(Expr::Connected(vec![
                 Expr::Connected(vec![A, B]),
                 Expr::Disconnected(vec![C, D])
@@ -229,13 +252,13 @@ mod tests {
         node!(G, H, G1, G2);
         enode!(A, B, C, D);
 
-        assert_eq!(Stmt::parser().parse("").into_result(), Ok(vec![]),);
+        assert_eq!(Stmt::parse("").into_result(), Ok(vec![]),);
         assert_eq!(
-            Stmt::parser().parse("G = {A, B}").into_result(),
+            Stmt::parse("G = {A, B}").into_result(),
             Ok(vec![Stmt::Assign(G, Expr::Connected(vec![A, B]))]),
         );
         assert_eq!(
-            Stmt::parser().parse("G = {A, B}H = [C, D]").into_result(),
+            Stmt::parse("G = {A, B}H = [C, D]").into_result(),
             Ok(vec![
                 Stmt::Assign(G, Expr::Connected(vec![A, B])),
                 Stmt::Assign(H, Expr::Disconnected(vec![C, D])),
@@ -264,7 +287,7 @@ mod tests {
     #[test]
     fn display_stmt() {
         assert_eq!(
-            Stmt::parser().parse("  G={A,[B,C]}").unwrap()[0].to_string(),
+            Stmt::parse("  G={A,[B,C]}").unwrap()[0].to_string(),
             "G = [{A, B}, {A, C}]"
         )
     }
@@ -275,7 +298,7 @@ mod tests {
         enode!(A, B, C, D);
 
         assert_eq!(
-            Ret::parser().parse("{A, [C, D]}").into_result(),
+            Ret::parse("{A, [C, D]}").into_result(),
             Ok(Ret(
                 vec![],
                 Expr::Connected(vec![A, Expr::Disconnected(vec![C, D])]),
@@ -283,7 +306,7 @@ mod tests {
         );
 
         assert_eq!(
-            Ret::parser().parse("G = {A, [C, D]} {G, B}").into_result(),
+            Ret::parse("G = {A, [C, D]} {G, B}").into_result(),
             Ok(Ret(
                 vec![Stmt::Assign(
                     G,
@@ -312,9 +335,6 @@ mod tests {
 
     #[test]
     fn display_ret() {
-        assert_eq!(
-            Ret::parser().parse("  G=A B").unwrap().to_string(),
-            "G = A\nB"
-        )
+        assert_eq!(Ret::parse("  G=A B").unwrap().to_string(), "G = A\nB")
     }
 }

@@ -1,5 +1,4 @@
-use chumsky::Parser;
-use grapl::{Expr, Normalize};
+use grapl::{Expr, Normalize, Parse};
 use microxdg::{Xdg, XdgError};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -22,7 +21,7 @@ fn main() -> rustyline::Result<()> {
     loop {
         let readline = rl.readline("> ");
         match readline {
-            Ok(line) => match Expr::parser().parse(line.as_str()).into_result() {
+            Ok(line) => match Expr::parse(line.as_str()).into_result() {
                 Ok(expr) => {
                     rl.add_history_entry(line.as_str()).unwrap();
                     println!("{}", expr.normalize());
