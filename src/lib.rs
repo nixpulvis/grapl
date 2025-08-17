@@ -78,10 +78,6 @@ pub fn stmts<'src>() -> impl Parser<'src, &'src str, Vec<Stmt<'src>>> + Clone {
 pub struct Ret<'src>(Vec<Stmt<'src>>, Expr<'src>);
 
 pub fn ret<'src>() -> impl Parser<'src, &'src str, Ret<'src>> + Clone {
-    // stmts()
-    //     .then(newline())
-    //     .then(expr())
-    //     .map(|((s, _), e)| Ret(s, e))
     stmts().then(expr()).map(|(s, e)| Ret(s, e))
 }
 
