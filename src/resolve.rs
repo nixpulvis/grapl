@@ -1,3 +1,11 @@
+//! Replacement using assign statements.
+//!
+//! This module defines the needed structures to keep track of and properly
+//! replace nodes which refer to previously bound nodes in [`Stmt::Assign`]
+//! statements. There are some subtleties with respect to node shadowing and
+//! recursion. See [`Config`] and [`Env`] for more information on how this is
+//! handled.
+
 use crate::{Expr, Node, Ret, Stmt};
 use std::collections::HashMap;
 
@@ -26,11 +34,19 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Allow redefinition of nodes in assignment.
+    ///
+    /// ```grapl
+    /// G = A
+    /// G = B
+    /// G => B
+    /// ```
     pub fn with_shadowing(mut self) -> Self {
         self.shadowing = true;
         self
     }
 
+    /// TODO
     pub fn with_recursion(mut self) -> Self {
         self.recursion = true;
         self
@@ -41,8 +57,8 @@ impl Config {
 /// Errors that can occur during resolution.
 pub enum Error {
     /// ```grapl
-    /// G = {A, B}
-    /// G = {B, C}
+    /// G = A
+    /// G = B
     /// ```
     Shadowing,
     /// ```grapl
@@ -56,10 +72,12 @@ pub enum Error {
 pub struct Env<'cfg, 'src>(HashMap<Node<'src>, Expr<'src>>, &'cfg Config);
 
 impl<'cfg, 'src> Env<'cfg, 'src> {
+    /// Create a new empty resolution environment.
     pub fn new(config: &'cfg Config) -> Self {
         Env(HashMap::new(), config)
     }
 
+    /// Returns the expression bound to the given node in this environment.
     pub fn lookup(&self, node: &Node<'src>) -> Expr<'src> {
         if let Some(expr) = self.0.get(node) {
             expr.clone()
@@ -68,6 +86,11 @@ impl<'cfg, 'src> Env<'cfg, 'src> {
         }
     }
 
+    /// Inserts the given node's expression into this environment.
+    ///
+    /// This function returns an error when it detects [`Error::Shadowing`] or
+    /// [`Error::Recursion`] depending on if it's allowed by this environment's
+    /// configuration.
     pub fn insert(&mut self, node: Node<'src>, expr: Expr<'src>) -> Result<(), Error> {
         if !self.1.shadowing && self.0.contains_key(&node) {
             Err(Error::Shadowing)
@@ -80,13 +103,13 @@ impl<'cfg, 'src> Env<'cfg, 'src> {
     }
 }
 
-/// Resolution of named graphs in [`Ret`] and slices of [`Stmt`] structures.
+/// Resolution of named graphs.
 ///
 /// ```grapl
 /// G = [A, B]
 /// {X, G}
 /// =>
-/// [{X, A}, {X, B}]
+/// {X, [A, B]}
 /// ```
 pub trait Resolve<'src>
 where
