@@ -8,18 +8,21 @@ and set-like operations. Stay tuned!
 ## Syntax
 
 ### Fully Connected Graph
+
 ```
 {A, B, C, D}
 ```
 ![](img/connected-graph.png)
 
 ### Fully Disconnected Graph
+
 ```
 [A, B, C, D]
 ```
 ![](img/disconnected-graph.png)
 
 ### Distributivity
+
 ```
 {S, [A, B, C, D]}
 => normalize
@@ -28,7 +31,8 @@ and set-like operations. Stay tuned!
 ![](img/star-graph.png)
 
 ### Resolution
-WIP
+[WIP #1](https://github.com/nixpulvis/grapl/pull/1)
+
 ```
 G1 = [A, B]
 G2 = {X, G1}
