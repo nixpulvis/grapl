@@ -235,6 +235,15 @@ mod tests {
                 .normalize(),
             Expr::parser().parse("[{A, B, C}, {A, B, D}]").unwrap(),
         );
+        assert_eq!(
+            Expr::parser()
+                .parse("{[A, B], [C, D]}")
+                .unwrap()
+                .normalize(),
+            Expr::parser()
+                .parse("[{A, C}, {A, D}, {B, C}, {B, D}]")
+                .unwrap(),
+        );
 
         assert_eq!(
             Expr::parser().parse("{A, [B, C], D}").unwrap().normalize(),
