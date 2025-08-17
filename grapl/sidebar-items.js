@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Expr","Stmt"],"struct":["Node","Ret"],"trait":["Normalize"]};
+window.SIDEBAR_ITEMS = {"enum":["Expr","Stmt"],"struct":["Node","Ret"],"trait":["Normalize","Parse"]};
