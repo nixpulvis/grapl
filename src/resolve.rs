@@ -92,11 +92,15 @@ pub trait Resolve<'src>
 where
     Self: Sized,
 {
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self, Error>;
+    type Output;
+
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error>;
 }
 
 impl<'src> Resolve<'src> for Expr<'src> {
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self, Error> {
+    type Output = Self;
+
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
         macro_rules! inner {
             ($exprs:expr, $variant:path) => {{
                 let mut fresh = vec![];
@@ -116,7 +120,9 @@ impl<'src> Resolve<'src> for Expr<'src> {
 }
 
 impl<'src> Resolve<'src> for Vec<Stmt<'src>> {
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self, Error> {
+    type Output = Self;
+
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
         let mut fresh = vec![];
         for stmt in self {
             match stmt {
@@ -132,16 +138,18 @@ impl<'src> Resolve<'src> for Vec<Stmt<'src>> {
 }
 
 impl<'src> Resolve<'src> for Ret<'src> {
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self, Error> {
-        let stmts = self.0.resolve(env);
-        todo!()
+    type Output = Expr<'src>;
+
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
+        self.0.resolve(env)?;
+        self.1.resolve(env)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Expr, Node, Parse, Resolve, Stmt,
+        Expr, Node, Parse, Resolve, Ret, Stmt,
         resolve::{Config, Env},
     };
     use pretty_assertions::assert_eq;
@@ -180,6 +188,25 @@ mod tests {
                 "#
             )
             .unwrap(),
+        );
+    }
+
+    #[test]
+    fn resolve_ret() {
+        let config = Config::default();
+        let mut env = Env::new(&config);
+
+        assert_eq!(
+            Ret::parse(
+                r#"
+                    G = A
+                    A
+                "#
+            )
+            .unwrap()
+            .resolve(&mut env)
+            .unwrap(),
+            Expr::parse("A").unwrap(),
         );
     }
 
