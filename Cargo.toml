@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 chumsky = "0.10"
+
+[dev-dependencies]
+pretty_assertions = "1.0"

@@ -21,7 +21,6 @@ pub enum Expr<'src> {
     Node(Node<'src>),
     Connected(Vec<Expr<'src>>),
     Disconnected(Vec<Expr<'src>>),
-    Stmts(Vec<Stmt<'src>>, Box<Expr<'src>>),
 }
 
 pub fn expr<'src>() -> impl Parser<'src, &'src str, Expr<'src>> + Clone {
@@ -86,6 +85,9 @@ pub fn ret<'src>() -> impl Parser<'src, &'src str, Ret<'src>> + Clone {
     stmts().then(expr()).map(|(s, e)| Ret(s, e))
 }
 
+mod normal;
+pub use self::normal::Normalize;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +150,13 @@ mod tests {
                 Expr::Disconnected(vec![C, D])
             ]))
         );
+        assert_eq!(
+            expr().parse("{{A, B}, [C, D]}").into_result(),
+            Ok(Expr::Connected(vec![
+                Expr::Connected(vec![A, B]),
+                Expr::Disconnected(vec![C, D])
+            ]))
+        )
     }
 
     #[test]
