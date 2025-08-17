@@ -19,7 +19,7 @@ impl<'src> Normalize for Expr<'src> {
     fn normalize(&self) -> Self {
         match self {
             Expr::Node(node) => Expr::Node(node.clone()),
-            Expr::Connected(exprs) => {
+            Expr::FullyConnected(exprs) => {
                 // General reduction strategy follow these steps:
                 // {A, [B, C], D, [E, F]} =>
                 // [{A}, [B, C], D, [E, F]] =>
@@ -48,7 +48,7 @@ impl<'src> Normalize for Expr<'src> {
                         // dcs = [[A],[B]]
                         // expr = {C,D}
                         // dcs <= [[A,C,D],[B,C,D]]
-                        Expr::Connected(cexprs) => {
+                        Expr::FullyConnected(cexprs) => {
                             for cexpr in cexprs {
                                 for dc in dcs.iter_mut() {
                                     dc.push(cexpr.clone());
@@ -58,7 +58,7 @@ impl<'src> Normalize for Expr<'src> {
                         // dcs = [[A,B][C]]
                         // expr = [D,E]
                         // dcs <= [[A,B,D],[C,D],[A,B,E],[C,E]]
-                        Expr::Disconnected(dexprs) => {
+                        Expr::FullyDisconnected(dexprs) => {
                             let mut freshs = vec![];
                             for dc in dcs.iter() {
                                 for dexpr in dexprs.iter() {
@@ -69,20 +69,22 @@ impl<'src> Normalize for Expr<'src> {
                                         // inside disconnected expression. E.g:
                                         // {A,[{B,C},D]}.
                                         e @ Expr::Node(_) => fresh.push(e.clone()),
-                                        Expr::Connected(cs) => {
+                                        Expr::FullyConnected(cs) => {
                                             for c in cs {
                                                 fresh.push(c.clone());
                                             }
                                         }
                                         // This subexpression is normalized and
                                         // therefore cannot have nested [[]].
-                                        Expr::Disconnected(_) => unreachable!(),
+                                        Expr::FullyDisconnected(_) => unreachable!(),
+                                        _ => todo!(),
                                     }
                                     freshs.push(fresh.clone());
                                 }
                             }
                             dcs = freshs;
                         }
+                        _ => todo!(),
                     }
                 }
 
@@ -93,13 +95,14 @@ impl<'src> Normalize for Expr<'src> {
                         cs.remove(0)
                     } else {
                         // {[{A, B}]} => {A, B}
-                        Expr::Connected(cs)
+                        Expr::FullyConnected(cs)
                     }
                 } else {
-                    Expr::Disconnected(dcs.into_iter().map(Expr::Connected).collect())
+                    let cs = dcs.into_iter().map(Expr::FullyConnected).collect();
+                    Expr::FullyDisconnected(cs)
                 }
             }
-            Expr::Disconnected(exprs) => {
+            Expr::FullyDisconnected(exprs) => {
                 // Collect a list of disconnected nodes.
                 let mut ds = vec![];
                 for expr in exprs {
@@ -107,15 +110,16 @@ impl<'src> Normalize for Expr<'src> {
                         // ds = [A,B]
                         // expr = {C,D}
                         // ds <= [A,B,{C,D}]
-                        e @ Expr::Node(_) | e @ Expr::Connected(_) => ds.push(e),
+                        e @ Expr::Node(_) | e @ Expr::FullyConnected(_) => ds.push(e),
                         // ds = [A,B]
                         // expr = [C,D]
                         // ds <= [A,B,C,D]
-                        Expr::Disconnected(dexprs) => {
+                        Expr::FullyDisconnected(dexprs) => {
                             for dexpr in dexprs {
                                 ds.push(dexpr);
                             }
                         }
+                        _ => todo!(),
                     }
                 }
 
@@ -124,9 +128,10 @@ impl<'src> Normalize for Expr<'src> {
                     ds.remove(0)
                 } else {
                     // [A,[B,C],{D,E}] => [A,B,C,{D,E}]
-                    Expr::Disconnected(ds)
+                    Expr::FullyDisconnected(ds)
                 }
             }
+            _ => todo!(),
         }
     }
 }
