@@ -7,7 +7,7 @@
 <a href=#7 id=7 data-nosnippet>7</a>/// - Fully connected graphs are flattened: `{{A, B}, C} =&gt; {A, B, C}`
 <a href=#8 id=8 data-nosnippet>8</a>/// - Normalized graphs with disconnected expressions all collapse into a single
 <a href=#9 id=9 data-nosnippet>9</a>///   fully disconnected expression:
-<a href=#10 id=10 data-nosnippet>10</a>/// ```
+<a href=#10 id=10 data-nosnippet>10</a>/// ```grapl
 <a href=#11 id=11 data-nosnippet>11</a>/// {[A, B], [C, D]} =&gt;
 <a href=#12 id=12 data-nosnippet>12</a>/// [{A, C}, {A, D}, {B, C}, {B, D}]
 <a href=#13 id=13 data-nosnippet>13</a>/// ```
@@ -60,8 +60,8 @@
 <a href=#60 id=60 data-nosnippet>60</a>                        // dcs &lt;= [[A,B,D],[C,D],[A,B,E],[C,E]]
 <a href=#61 id=61 data-nosnippet>61</a>                        </span>Expr::Disconnected(dexprs) =&gt; {
 <a href=#62 id=62 data-nosnippet>62</a>                            <span class="kw">let </span><span class="kw-2">mut </span>freshs = <span class="macro">vec!</span>[];
-<a href=#63 id=63 data-nosnippet>63</a>                            <span class="kw">for </span>dexpr <span class="kw">in </span>dexprs.iter() {
-<a href=#64 id=64 data-nosnippet>64</a>                                <span class="kw">for </span>dc <span class="kw">in </span>dcs.iter() {
+<a href=#63 id=63 data-nosnippet>63</a>                            <span class="kw">for </span>dc <span class="kw">in </span>dcs.iter() {
+<a href=#64 id=64 data-nosnippet>64</a>                                <span class="kw">for </span>dexpr <span class="kw">in </span>dexprs.iter() {
 <a href=#65 id=65 data-nosnippet>65</a>                                    <span class="kw">let </span><span class="kw-2">mut </span>fresh = dc.clone();
 <a href=#66 id=66 data-nosnippet>66</a>                                    <span class="kw">match </span>dexpr {
 <a href=#67 id=67 data-nosnippet>67</a>                                        <span class="comment">// This is kinda gnarly... but we need
@@ -278,8 +278,8 @@
 <a href=#278 id=278 data-nosnippet>278</a>                .parse(
 <a href=#279 id=279 data-nosnippet>279</a>                    <span class="string">"[
 <a href=#280 id=280 data-nosnippet>280</a>                    {A, B, C, E, F},
-<a href=#281 id=281 data-nosnippet>281</a>                    {A, D, E, F},
-<a href=#282 id=282 data-nosnippet>282</a>                    {A, B, C, E, G},
+<a href=#281 id=281 data-nosnippet>281</a>                    {A, B, C, E, G},
+<a href=#282 id=282 data-nosnippet>282</a>                    {A, D, E, F},
 <a href=#283 id=283 data-nosnippet>283</a>                    {A, D, E, G},
 <a href=#284 id=284 data-nosnippet>284</a>                    ]"
 <a href=#285 id=285 data-nosnippet>285</a>                </span>)
