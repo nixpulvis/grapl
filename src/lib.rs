@@ -19,7 +19,7 @@ where
 /// Nodes used as base indentifiers or to refer to other graphs.
 ///
 /// Examples of nodes: `A`, `a`, `G1`...
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Node<'src>(&'src str);
 
 impl<'src> Parse<'src> for Node<'src> {
@@ -40,7 +40,7 @@ impl<'src> std::fmt::Display for Node<'src> {
 /// { A, B }
 /// { A, [B, C] }
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr<'src> {
     Node(Node<'src>),
     Connected(Vec<Expr<'src>>),
@@ -70,6 +70,17 @@ impl<'src> Parse<'src> for Expr<'src> {
 
             choice((node, connected, disconnected)).padded()
         })
+    }
+}
+
+impl<'src> Expr<'src> {
+    pub fn contains_node(&self, node: &Node<'src>) -> bool {
+        match self {
+            Expr::Node(n) => node == n,
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
+                exprs.iter().all(|e| e.contains_node(node))
+            }
+        }
     }
 }
 
@@ -159,6 +170,9 @@ impl<'src> std::fmt::Display for Ret<'src> {
 
 mod normal;
 pub use self::normal::Normalize;
+
+pub mod resolve;
+pub use self::resolve::Resolve;
 
 #[cfg(test)]
 mod tests {

@@ -313,54 +313,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn normalize_referent_stmt() {
-        assert_eq!(
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = [A, B]
-                    G2 = {X, G1}
-                    "#
-                )
-                .unwrap()
-                .iter()
-                .map(Normalize::normalize)
-                .collect::<Vec<_>>(),
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = [A, B]
-                    G2 = [{X, A}, {X, B}]
-                "#
-                )
-                .unwrap(),
-        );
-        // TODO: Consider this case a little more.
-        assert_eq!(
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = G2
-                    G2 = G1
-                    "#
-                )
-                .unwrap()
-                .iter()
-                .map(Normalize::normalize)
-                .collect::<Vec<_>>(),
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = G2
-                    G2 = G2
-                "#
-                )
-                .unwrap(),
-        );
-    }
-
-    #[test]
     fn normalize_ret() {
         assert_eq!(
             Ret::parser()
