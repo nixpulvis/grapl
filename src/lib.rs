@@ -9,11 +9,9 @@ pub trait Parse<'src>
 where
     Self: Sized,
 {
-    type Output;
+    fn parser() -> impl Parser<'src, &'src str, Self> + Clone;
 
-    fn parser() -> impl Parser<'src, &'src str, Self::Output> + Clone;
-
-    fn parse(input: &'src str) -> ParseResult<Self::Output, EmptyErr> {
+    fn parse(input: &'src str) -> ParseResult<Self, EmptyErr> {
         Self::parser().parse(input)
     }
 }
@@ -25,8 +23,6 @@ where
 pub struct Node<'src>(&'src str);
 
 impl<'src> Parse<'src> for Node<'src> {
-    type Output = Self;
-
     fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         text::ascii::ident().padded().map(Node)
     }
@@ -52,8 +48,6 @@ pub enum Expr<'src> {
 }
 
 impl<'src> Parse<'src> for Expr<'src> {
-    type Output = Self;
-
     fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         recursive(|expr| {
             let node = Node::parser().map(Expr::Node);
@@ -109,13 +103,17 @@ pub enum Stmt<'src> {
 }
 
 impl<'src> Parse<'src> for Stmt<'src> {
-    type Output = Vec<Self>;
-
-    fn parser() -> impl Parser<'src, &'src str, Vec<Self>> + Clone {
+    fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         Node::parser()
             .then(just("=").padded())
             .then(Expr::parser())
             .map(|((n, _), e)| Stmt::Assign(n, e))
+    }
+}
+
+impl<'src> Parse<'src> for Vec<Stmt<'src>> {
+    fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
+        Stmt::parser()
             .separated_by(text::whitespace())
             .collect::<Vec<_>>()
     }
@@ -139,10 +137,10 @@ impl<'src> std::fmt::Display for Stmt<'src> {
 pub struct Ret<'src>(Vec<Stmt<'src>>, Expr<'src>);
 
 impl<'src> Parse<'src> for Ret<'src> {
-    type Output = Self;
-
     fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
-        Stmt::parser().then(Expr::parser()).map(|(s, e)| Ret(s, e))
+        Vec::<Stmt>::parser()
+            .then(Expr::parser())
+            .map(|(s, e)| Ret(s, e))
     }
 }
 
@@ -252,20 +250,21 @@ mod tests {
         node!(G, H, G1, G2);
         enode!(A, B, C, D);
 
-        assert_eq!(Stmt::parse("").into_result(), Ok(vec![]),);
+        assert!(Stmt::parse("").has_errors());
+        assert_eq!(Vec::<Stmt>::parse("").into_result(), Ok(vec![]),);
         assert_eq!(
             Stmt::parse("G = {A, B}").into_result(),
-            Ok(vec![Stmt::Assign(G, Expr::Connected(vec![A, B]))]),
+            Ok(Stmt::Assign(G, Expr::Connected(vec![A, B]))),
         );
         assert_eq!(
-            Stmt::parse("G = {A, B}H = [C, D]").into_result(),
+            Vec::<Stmt>::parse("G = {A, B}H = [C, D]").into_result(),
             Ok(vec![
                 Stmt::Assign(G, Expr::Connected(vec![A, B])),
                 Stmt::Assign(H, Expr::Disconnected(vec![C, D])),
             ]),
         );
         assert_eq!(
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                         G1 = {A, B}
@@ -287,7 +286,7 @@ mod tests {
     #[test]
     fn display_stmt() {
         assert_eq!(
-            Stmt::parse("  G={A,[B,C]}").unwrap()[0].to_string(),
+            Stmt::parse("  G={A,[B,C]}").unwrap().to_string(),
             "G = [{A, B}, {A, C}]"
         )
     }

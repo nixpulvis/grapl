@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn normalize_disjoint_stmts() {
         assert_eq!(
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                     G1 = {A, [B, C]}
@@ -301,7 +301,7 @@ mod tests {
                 .iter()
                 .map(Normalize::normalize)
                 .collect::<Vec<_>>(),
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                     G1 = [{A, B}, {A, C}]
@@ -316,7 +316,7 @@ mod tests {
     #[ignore]
     fn normalize_referent_stmt() {
         assert_eq!(
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                     G1 = [A, B]
@@ -327,7 +327,7 @@ mod tests {
                 .iter()
                 .map(Normalize::normalize)
                 .collect::<Vec<_>>(),
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                     G1 = [A, B]
@@ -338,7 +338,7 @@ mod tests {
         );
         // TODO: Consider this case a little more.
         assert_eq!(
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                     G1 = G2
@@ -349,7 +349,7 @@ mod tests {
                 .iter()
                 .map(Normalize::normalize)
                 .collect::<Vec<_>>(),
-            Stmt::parser()
+            Vec::<Stmt>::parser()
                 .parse(
                     r#"
                     G1 = G2
