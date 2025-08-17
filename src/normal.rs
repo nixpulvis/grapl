@@ -7,7 +7,7 @@ use crate::{Expr, Ret, Stmt};
 /// - Fully connected graphs are flattened: `{{A, B}, C} => {A, B, C}`
 /// - Normalized graphs with disconnected expressions all collapse into a single
 ///   fully disconnected expression:
-/// ```
+/// ```grapl
 /// {[A, B], [C, D]} =>
 /// [{A, C}, {A, D}, {B, C}, {B, D}]
 /// ```
@@ -60,8 +60,8 @@ impl<'src> Normalize for Expr<'src> {
                         // dcs <= [[A,B,D],[C,D],[A,B,E],[C,E]]
                         Expr::Disconnected(dexprs) => {
                             let mut freshs = vec![];
-                            for dexpr in dexprs.iter() {
-                                for dc in dcs.iter() {
+                            for dc in dcs.iter() {
+                                for dexpr in dexprs.iter() {
                                     let mut fresh = dc.clone();
                                     match dexpr {
                                         // This is kinda gnarly... but we need
@@ -278,8 +278,8 @@ mod tests {
                 .parse(
                     "[
                     {A, B, C, E, F},
-                    {A, D, E, F},
                     {A, B, C, E, G},
+                    {A, D, E, F},
                     {A, D, E, G},
                     ]"
                 )
