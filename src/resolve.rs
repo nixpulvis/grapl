@@ -142,19 +142,27 @@ impl<'src> Resolve<'src> for Expr<'src> {
     }
 }
 
+impl<'src> Resolve<'src> for Stmt<'src> {
+    type Output = Self;
+
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
+        match self {
+            Stmt::Assign(node, expr) => {
+                let resolved = expr.resolve(env)?;
+                env.insert(node.clone(), resolved.clone())?;
+                Ok(Stmt::Assign(node.clone(), resolved))
+            }
+        }
+    }
+}
+
 impl<'src> Resolve<'src> for Vec<Stmt<'src>> {
     type Output = Self;
 
     fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
         let mut fresh = vec![];
         for stmt in self {
-            match stmt {
-                Stmt::Assign(node, expr) => {
-                    let resolved = expr.resolve(env)?;
-                    env.insert(node.clone(), resolved.clone())?;
-                    fresh.push(Stmt::Assign(node.clone(), resolved));
-                }
-            }
+            fresh.push(stmt.resolve(env)?);
         }
         Ok(fresh)
     }
