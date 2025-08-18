@@ -69,16 +69,16 @@ pub enum Error {
 
 /// Running resolution environment used to maintain state.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Env<'cfg, 'src>(HashMap<Node<'src>, Expr<'src>>, &'cfg Config);
+pub struct Env<'cfg>(HashMap<Node, Expr>, &'cfg Config);
 
-impl<'cfg, 'src> Env<'cfg, 'src> {
+impl<'cfg> Env<'cfg> {
     /// Create a new empty resolution environment.
     pub fn new(config: &'cfg Config) -> Self {
         Env(HashMap::new(), config)
     }
 
     /// Returns the expression bound to the given node in this environment.
-    pub fn lookup(&self, node: &Node<'src>) -> Expr<'src> {
+    pub fn lookup(&self, node: &Node) -> Expr {
         if let Some(expr) = self.0.get(node) {
             expr.clone()
         } else {
@@ -91,7 +91,7 @@ impl<'cfg, 'src> Env<'cfg, 'src> {
     /// This function returns an error when it detects [`Error::Shadowing`] or
     /// [`Error::Recursion`] depending on if it's allowed by this environment's
     /// configuration.
-    pub fn insert(&mut self, node: Node<'src>, expr: Expr<'src>) -> Result<(), Error> {
+    pub fn insert(&mut self, node: Node, expr: Expr) -> Result<(), Error> {
         if !self.1.shadowing && self.0.contains_key(&node) {
             Err(Error::Shadowing)
         } else if !self.1.recursion && expr.contains_node(&node) {
@@ -117,13 +117,13 @@ where
 {
     type Output;
 
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error>;
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg>) -> Result<Self::Output, Error>;
 }
 
-impl<'src> Resolve<'src> for Expr<'src> {
+impl<'src> Resolve<'src> for Expr {
     type Output = Self;
 
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg>) -> Result<Self::Output, Error> {
         macro_rules! inner {
             ($exprs:expr, $variant:path) => {{
                 let mut fresh = vec![];
@@ -142,10 +142,10 @@ impl<'src> Resolve<'src> for Expr<'src> {
     }
 }
 
-impl<'src> Resolve<'src> for Stmt<'src> {
+impl<'src> Resolve<'src> for Stmt {
     type Output = Self;
 
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg>) -> Result<Self::Output, Error> {
         match self {
             Stmt::Assign(node, expr) => {
                 let resolved = expr.resolve(env)?;
@@ -156,10 +156,10 @@ impl<'src> Resolve<'src> for Stmt<'src> {
     }
 }
 
-impl<'src> Resolve<'src> for Vec<Stmt<'src>> {
+impl<'src> Resolve<'src> for Vec<Stmt> {
     type Output = Self;
 
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg>) -> Result<Self::Output, Error> {
         let mut fresh = vec![];
         for stmt in self {
             fresh.push(stmt.resolve(env)?);
@@ -168,10 +168,10 @@ impl<'src> Resolve<'src> for Vec<Stmt<'src>> {
     }
 }
 
-impl<'src> Resolve<'src> for Ret<'src> {
-    type Output = Expr<'src>;
+impl<'src> Resolve<'src> for Ret {
+    type Output = Expr;
 
-    fn resolve<'cfg>(&self, env: &mut Env<'cfg, 'src>) -> Result<Self::Output, Error> {
+    fn resolve<'cfg>(&self, env: &mut Env<'cfg>) -> Result<Self::Output, Error> {
         self.0.resolve(env)?;
         self.1.resolve(env)
     }
@@ -189,7 +189,8 @@ mod tests {
     fn resolve_expr() {
         let config = Config::default();
         let mut env = Env::new(&config);
-        env.insert(Node("A"), Expr::Node(Node("B"))).unwrap();
+        env.insert(Node("A".into()), Expr::Node(Node("B".into())))
+            .unwrap();
 
         assert_eq!(
             Expr::parse("A").unwrap().resolve(&mut env).unwrap(),
