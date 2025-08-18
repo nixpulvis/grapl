@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(
             Vec::<Stmt>::parse(
                 r#"
-                    G1 = G2
+                    G1 = A
                     G2 = G1
                 "#
             )
@@ -297,8 +297,8 @@ mod tests {
             .unwrap(),
             Vec::<Stmt>::parse(
                 r#"
-                    G1 = G2
-                    G2 = G2
+                    G1 = A
+                    G2 = A
                 "#
             )
             .unwrap(),
