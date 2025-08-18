@@ -25,7 +25,7 @@ impl<'src> Normalize for Expr<'src> {
                 // [{A}, [B, C], D, [E, F]] =>
                 // [{A, B}, {A, C}, D, [E, F]] =>
                 // [{A, B, D}, {A, C, D}, [E, F]] =>
-                // [{A, B, D, E}, {A, C, D, E}, {A, B, D, F}, {A, C, D, F}]
+                // [{A, B, D, E}, {A, B, D, F}, {A, C, D, E}, {A, C, D, F}]
 
                 // Collect a list of disconnected connected nodes.
                 let mut dcs = vec![];
