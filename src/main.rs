@@ -1,4 +1,5 @@
 use chumsky::Parser;
+use chumsky::prelude::just;
 use grapl::resolve::{Config, Env};
 use grapl::{Expr, Normalize, Parse, Resolve, Stmt};
 use microxdg::{Xdg, XdgError};
@@ -45,12 +46,18 @@ fn main() -> rustyline::Result<()> {
 enum Fixme {
     Expr(Expr),
     Stmt(Stmt),
+    Cmd(Cmd),
+}
+
+enum Cmd {
+    Env,
 }
 
 fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
     let stmt = Stmt::parser().map(|s| Fixme::Stmt(s));
     let expr = Expr::parser().map(|e| Fixme::Expr(e));
-    stmt.or(expr)
+    let cmd = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
+    stmt.or(expr).or(cmd)
 }
 
 fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<(), FileHistory>) {
@@ -66,6 +73,9 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
                     if let Err(err) = stmts.resolve(env) {
                         println!("Error: {:?}", err);
                     }
+                }
+                Fixme::Cmd(Cmd::Env) => {
+                    print!("{}", env);
                 }
             }
         }

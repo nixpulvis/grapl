@@ -8,6 +8,7 @@
 
 use crate::{Expr, Node, Ret, Stmt};
 use std::collections::HashMap;
+use std::fmt;
 
 /// Graph resolution configuration options.
 #[derive(Debug, PartialEq, Eq)]
@@ -100,6 +101,16 @@ impl<'cfg> Env<'cfg> {
             self.0.insert(node, expr);
             Ok(())
         }
+    }
+}
+
+/// Implement Display for Env to show its contents.
+impl<'cfg> fmt::Display for Env<'cfg> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (node, expr) in &self.0 {
+            writeln!(f, "{} = {}", node, expr)?;
+        }
+        Ok(())
     }
 }
 
