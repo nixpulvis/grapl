@@ -15,7 +15,7 @@
 <a href=#15 id=15 data-nosnippet>15</a>    <span class="kw">fn </span>normalize(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
 <a href=#16 id=16 data-nosnippet>16</a>}
 <a href=#17 id=17 data-nosnippet>17</a>
-<a href=#18 id=18 data-nosnippet>18</a><span class="kw">impl</span>&lt;<span class="lifetime">'src</span>&gt; Normalize <span class="kw">for </span>Expr&lt;<span class="lifetime">'src</span>&gt; {
+<a href=#18 id=18 data-nosnippet>18</a><span class="kw">impl</span>&lt;<span class="lifetime">'src</span>&gt; Normalize <span class="kw">for </span>Expr {
 <a href=#19 id=19 data-nosnippet>19</a>    <span class="kw">fn </span>normalize(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
 <a href=#20 id=20 data-nosnippet>20</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#21 id=21 data-nosnippet>21</a>            Expr::Node(node) =&gt; Expr::Node(node.clone()),
@@ -131,7 +131,7 @@
 <a href=#131 id=131 data-nosnippet>131</a>    }
 <a href=#132 id=132 data-nosnippet>132</a>}
 <a href=#133 id=133 data-nosnippet>133</a>
-<a href=#134 id=134 data-nosnippet>134</a><span class="kw">impl</span>&lt;<span class="lifetime">'src</span>&gt; Normalize <span class="kw">for </span>Stmt&lt;<span class="lifetime">'src</span>&gt; {
+<a href=#134 id=134 data-nosnippet>134</a><span class="kw">impl</span>&lt;<span class="lifetime">'src</span>&gt; Normalize <span class="kw">for </span>Stmt {
 <a href=#135 id=135 data-nosnippet>135</a>    <span class="kw">fn </span>normalize(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
 <a href=#136 id=136 data-nosnippet>136</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#137 id=137 data-nosnippet>137</a>            Stmt::Assign(node, expr) =&gt; Stmt::Assign(node.clone(), expr.normalize()),
@@ -139,7 +139,7 @@
 <a href=#139 id=139 data-nosnippet>139</a>    }
 <a href=#140 id=140 data-nosnippet>140</a>}
 <a href=#141 id=141 data-nosnippet>141</a>
-<a href=#142 id=142 data-nosnippet>142</a><span class="kw">impl</span>&lt;<span class="lifetime">'src</span>&gt; Normalize <span class="kw">for </span>Ret&lt;<span class="lifetime">'src</span>&gt; {
+<a href=#142 id=142 data-nosnippet>142</a><span class="kw">impl</span>&lt;<span class="lifetime">'src</span>&gt; Normalize <span class="kw">for </span>Ret {
 <a href=#143 id=143 data-nosnippet>143</a>    <span class="kw">fn </span>normalize(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
 <a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>norm_stmts = <span class="self">self</span>.<span class="number">0</span>.iter().map(Normalize::normalize).collect();
 <a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>norm_expr = <span class="self">self</span>.<span class="number">1</span>.normalize();
@@ -313,73 +313,25 @@
 <a href=#313 id=313 data-nosnippet>313</a>    }
 <a href=#314 id=314 data-nosnippet>314</a>
 <a href=#315 id=315 data-nosnippet>315</a>    <span class="attr">#[test]
-<a href=#316 id=316 data-nosnippet>316</a>    #[ignore]
-<a href=#317 id=317 data-nosnippet>317</a>    </span><span class="kw">fn </span>normalize_referent_stmt() {
-<a href=#318 id=318 data-nosnippet>318</a>        <span class="macro">assert_eq!</span>(
-<a href=#319 id=319 data-nosnippet>319</a>            Vec::&lt;Stmt&gt;::parser()
-<a href=#320 id=320 data-nosnippet>320</a>                .parse(
-<a href=#321 id=321 data-nosnippet>321</a>                    <span class="string">r#"
-<a href=#322 id=322 data-nosnippet>322</a>                    G1 = [A, B]
-<a href=#323 id=323 data-nosnippet>323</a>                    G2 = {X, G1}
-<a href=#324 id=324 data-nosnippet>324</a>                    "#
-<a href=#325 id=325 data-nosnippet>325</a>                </span>)
-<a href=#326 id=326 data-nosnippet>326</a>                .unwrap()
-<a href=#327 id=327 data-nosnippet>327</a>                .iter()
-<a href=#328 id=328 data-nosnippet>328</a>                .map(Normalize::normalize)
-<a href=#329 id=329 data-nosnippet>329</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#330 id=330 data-nosnippet>330</a>            Vec::&lt;Stmt&gt;::parser()
-<a href=#331 id=331 data-nosnippet>331</a>                .parse(
-<a href=#332 id=332 data-nosnippet>332</a>                    <span class="string">r#"
-<a href=#333 id=333 data-nosnippet>333</a>                    G1 = [A, B]
-<a href=#334 id=334 data-nosnippet>334</a>                    G2 = [{X, A}, {X, B}]
-<a href=#335 id=335 data-nosnippet>335</a>                "#
-<a href=#336 id=336 data-nosnippet>336</a>                </span>)
-<a href=#337 id=337 data-nosnippet>337</a>                .unwrap(),
-<a href=#338 id=338 data-nosnippet>338</a>        );
-<a href=#339 id=339 data-nosnippet>339</a>        <span class="comment">// TODO: Consider this case a little more.
-<a href=#340 id=340 data-nosnippet>340</a>        </span><span class="macro">assert_eq!</span>(
-<a href=#341 id=341 data-nosnippet>341</a>            Vec::&lt;Stmt&gt;::parser()
-<a href=#342 id=342 data-nosnippet>342</a>                .parse(
-<a href=#343 id=343 data-nosnippet>343</a>                    <span class="string">r#"
-<a href=#344 id=344 data-nosnippet>344</a>                    G1 = G2
-<a href=#345 id=345 data-nosnippet>345</a>                    G2 = G1
-<a href=#346 id=346 data-nosnippet>346</a>                    "#
-<a href=#347 id=347 data-nosnippet>347</a>                </span>)
-<a href=#348 id=348 data-nosnippet>348</a>                .unwrap()
-<a href=#349 id=349 data-nosnippet>349</a>                .iter()
-<a href=#350 id=350 data-nosnippet>350</a>                .map(Normalize::normalize)
-<a href=#351 id=351 data-nosnippet>351</a>                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
-<a href=#352 id=352 data-nosnippet>352</a>            Vec::&lt;Stmt&gt;::parser()
-<a href=#353 id=353 data-nosnippet>353</a>                .parse(
-<a href=#354 id=354 data-nosnippet>354</a>                    <span class="string">r#"
-<a href=#355 id=355 data-nosnippet>355</a>                    G1 = G2
-<a href=#356 id=356 data-nosnippet>356</a>                    G2 = G2
-<a href=#357 id=357 data-nosnippet>357</a>                "#
-<a href=#358 id=358 data-nosnippet>358</a>                </span>)
-<a href=#359 id=359 data-nosnippet>359</a>                .unwrap(),
-<a href=#360 id=360 data-nosnippet>360</a>        );
-<a href=#361 id=361 data-nosnippet>361</a>    }
-<a href=#362 id=362 data-nosnippet>362</a>
-<a href=#363 id=363 data-nosnippet>363</a>    <span class="attr">#[test]
-<a href=#364 id=364 data-nosnippet>364</a>    </span><span class="kw">fn </span>normalize_ret() {
-<a href=#365 id=365 data-nosnippet>365</a>        <span class="macro">assert_eq!</span>(
-<a href=#366 id=366 data-nosnippet>366</a>            Ret::parser()
-<a href=#367 id=367 data-nosnippet>367</a>                .parse(
-<a href=#368 id=368 data-nosnippet>368</a>                    <span class="string">r#"
-<a href=#369 id=369 data-nosnippet>369</a>                    G1 = {A, [B, C]}
-<a href=#370 id=370 data-nosnippet>370</a>                    [[{{D}}]]
-<a href=#371 id=371 data-nosnippet>371</a>                    "#
-<a href=#372 id=372 data-nosnippet>372</a>                </span>)
-<a href=#373 id=373 data-nosnippet>373</a>                .unwrap()
-<a href=#374 id=374 data-nosnippet>374</a>                .normalize(),
-<a href=#375 id=375 data-nosnippet>375</a>            Ret::parser()
-<a href=#376 id=376 data-nosnippet>376</a>                .parse(
-<a href=#377 id=377 data-nosnippet>377</a>                    <span class="string">r#"
-<a href=#378 id=378 data-nosnippet>378</a>                    G1 = [{A, B}, {A, C}]
-<a href=#379 id=379 data-nosnippet>379</a>                    D
-<a href=#380 id=380 data-nosnippet>380</a>                "#
-<a href=#381 id=381 data-nosnippet>381</a>                </span>)
-<a href=#382 id=382 data-nosnippet>382</a>                .unwrap(),
-<a href=#383 id=383 data-nosnippet>383</a>        );
-<a href=#384 id=384 data-nosnippet>384</a>    }
-<a href=#385 id=385 data-nosnippet>385</a>}</code></pre></div></section></main></body></html>
+<a href=#316 id=316 data-nosnippet>316</a>    </span><span class="kw">fn </span>normalize_ret() {
+<a href=#317 id=317 data-nosnippet>317</a>        <span class="macro">assert_eq!</span>(
+<a href=#318 id=318 data-nosnippet>318</a>            Ret::parser()
+<a href=#319 id=319 data-nosnippet>319</a>                .parse(
+<a href=#320 id=320 data-nosnippet>320</a>                    <span class="string">r#"
+<a href=#321 id=321 data-nosnippet>321</a>                    G1 = {A, [B, C]}
+<a href=#322 id=322 data-nosnippet>322</a>                    [[{{D}}]]
+<a href=#323 id=323 data-nosnippet>323</a>                    "#
+<a href=#324 id=324 data-nosnippet>324</a>                </span>)
+<a href=#325 id=325 data-nosnippet>325</a>                .unwrap()
+<a href=#326 id=326 data-nosnippet>326</a>                .normalize(),
+<a href=#327 id=327 data-nosnippet>327</a>            Ret::parser()
+<a href=#328 id=328 data-nosnippet>328</a>                .parse(
+<a href=#329 id=329 data-nosnippet>329</a>                    <span class="string">r#"
+<a href=#330 id=330 data-nosnippet>330</a>                    G1 = [{A, B}, {A, C}]
+<a href=#331 id=331 data-nosnippet>331</a>                    D
+<a href=#332 id=332 data-nosnippet>332</a>                "#
+<a href=#333 id=333 data-nosnippet>333</a>                </span>)
+<a href=#334 id=334 data-nosnippet>334</a>                .unwrap(),
+<a href=#335 id=335 data-nosnippet>335</a>        );
+<a href=#336 id=336 data-nosnippet>336</a>    }
+<a href=#337 id=337 data-nosnippet>337</a>}</code></pre></div></section></main></body></html>
