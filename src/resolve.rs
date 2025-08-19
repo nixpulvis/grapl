@@ -231,6 +231,31 @@ mod tests {
             )
             .unwrap(),
         );
+
+        let mut env = Env::new(&config);
+        assert!(
+            Vec::<Stmt>::parse(
+                r#"
+                    G = A
+                    G = B
+                "#
+            )
+            .unwrap()
+            .resolve(&mut env)
+            .is_err()
+        );
+
+        let mut env = Env::new(&config);
+        assert!(
+            Vec::<Stmt>::parse(
+                r#"
+                    G = {A, G}
+                "#
+            )
+            .unwrap()
+            .resolve(&mut env)
+            .is_err()
+        );
     }
 
     #[test]
@@ -354,6 +379,7 @@ mod tests {
             .unwrap(),
         );
 
+        let mut env = Env::new(&config);
         assert_eq!(
             Vec::<Stmt>::parse(
                 r#"

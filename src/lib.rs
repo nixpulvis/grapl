@@ -80,7 +80,7 @@ impl<'src> Expr {
         match self {
             Expr::Node(n) => node == n,
             Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
-                exprs.iter().all(|e| e.contains_node(node))
+                exprs.iter().any(|e| e.contains_node(node))
             }
         }
     }
@@ -246,6 +246,16 @@ mod tests {
                 Expr::Connected(vec![enode!(A), enode!(B)]),
                 Expr::Disconnected(vec![enode!(C), enode!(D)])
             ]))
+        )
+    }
+
+    #[test]
+    fn contains_node_expr() {
+        assert!(
+            Expr::parser()
+                .parse("{A, {B, [C, D]}, {E, F}}")
+                .unwrap()
+                .contains_node(&node!(C))
         )
     }
 
