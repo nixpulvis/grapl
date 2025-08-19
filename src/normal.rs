@@ -15,7 +15,7 @@ pub trait Normalize {
     fn normalize(&self) -> Self;
 }
 
-impl<'src> Normalize for Expr<'src> {
+impl<'src> Normalize for Expr {
     fn normalize(&self) -> Self {
         match self {
             Expr::Node(node) => Expr::Node(node.clone()),
@@ -131,7 +131,7 @@ impl<'src> Normalize for Expr<'src> {
     }
 }
 
-impl<'src> Normalize for Stmt<'src> {
+impl<'src> Normalize for Stmt {
     fn normalize(&self) -> Self {
         match self {
             Stmt::Assign(node, expr) => Stmt::Assign(node.clone(), expr.normalize()),
@@ -139,7 +139,7 @@ impl<'src> Normalize for Stmt<'src> {
     }
 }
 
-impl<'src> Normalize for Ret<'src> {
+impl<'src> Normalize for Ret {
     fn normalize(&self) -> Self {
         let norm_stmts = self.0.iter().map(Normalize::normalize).collect();
         let norm_expr = self.1.normalize();
@@ -306,54 +306,6 @@ mod tests {
                     r#"
                     G1 = [{A, B}, {A, C}]
                     G2 = D
-                "#
-                )
-                .unwrap(),
-        );
-    }
-
-    #[test]
-    #[ignore]
-    fn normalize_referent_stmt() {
-        assert_eq!(
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = [A, B]
-                    G2 = {X, G1}
-                    "#
-                )
-                .unwrap()
-                .iter()
-                .map(Normalize::normalize)
-                .collect::<Vec<_>>(),
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = [A, B]
-                    G2 = [{X, A}, {X, B}]
-                "#
-                )
-                .unwrap(),
-        );
-        // TODO: Consider this case a little more.
-        assert_eq!(
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = G2
-                    G2 = G1
-                    "#
-                )
-                .unwrap()
-                .iter()
-                .map(Normalize::normalize)
-                .collect::<Vec<_>>(),
-            Vec::<Stmt>::parser()
-                .parse(
-                    r#"
-                    G1 = G2
-                    G2 = G2
                 "#
                 )
                 .unwrap(),

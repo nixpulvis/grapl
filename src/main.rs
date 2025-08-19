@@ -1,38 +1,27 @@
-use grapl::{Expr, Normalize, Parse};
+use chumsky::Parser;
+use chumsky::prelude::just;
+use grapl::resolve::{Config, Env};
+use grapl::{Expr, Normalize, Parse, Resolve, Stmt};
 use microxdg::{Xdg, XdgError};
-use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+use rustyline::history::FileHistory;
+use rustyline::{DefaultEditor, Editor};
 use std::fs;
 use std::path::PathBuf;
 
-const HISTFILE: &'static str = "grapl.history";
-
 fn main() -> rustyline::Result<()> {
     let mut rl = DefaultEditor::new()?;
+    load_history(&mut rl);
 
-    if let Ok(mut state) = get_xdg_state_dir() {
-        state.push("grapl");
-        if fs::create_dir_all(&state).is_ok() {
-            state.push(HISTFILE);
-            rl.load_history(&state).ok();
-        }
-    }
+    let config = Config::default().with_shadowing();
+    let mut env = Env::new(&config);
 
     loop {
         let readline = rl.readline("> ");
         match readline {
-            Ok(line) => match Expr::parse(line.as_str()).into_result() {
-                Ok(expr) => {
-                    rl.add_history_entry(line.as_str()).unwrap();
-                    println!("{}", expr.normalize());
-                }
-                Err(errors) => {
-                    println!("Invalid syntax:");
-                    for error in errors {
-                        println!("{}", error)
-                    }
-                }
-            },
+            Ok(line) => {
+                handle_line(line, &mut env, &mut rl);
+            }
             Err(ReadlineError::Interrupted) => {
                 println!("Ctrl-C pressed. Exiting.");
                 break;
@@ -48,16 +37,83 @@ fn main() -> rustyline::Result<()> {
         }
     }
 
-    // TODO: Refactor to remove duplicate code in loading.
-    if let Ok(mut state) = get_xdg_state_dir() {
-        state.push("grapl");
-        if fs::create_dir_all(&state).is_ok() {
-            state.push(HISTFILE);
-            rl.save_history(&state).ok();
-        }
-    }
+    save_history(&mut rl);
 
     Ok(())
+}
+
+// TODO: This should be in lib in some way.
+enum Fixme {
+    Expr(Expr),
+    Stmt(Stmt),
+    Cmd(Cmd),
+}
+
+enum Cmd {
+    Env,
+}
+
+fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
+    let stmt = Stmt::parser().map(|s| Fixme::Stmt(s));
+    let expr = Expr::parser().map(|e| Fixme::Expr(e));
+    let cmd = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
+    stmt.or(expr).or(cmd)
+}
+
+fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<(), FileHistory>) {
+    match repl_parser().parse(&line).into_result() {
+        Ok(fixme) => {
+            rl.add_history_entry(&line).unwrap();
+            match fixme {
+                Fixme::Expr(expr) => match expr.resolve(env) {
+                    Ok(expr) => println!("{}", expr.normalize()),
+                    Err(err) => println!("Error: {:?}", err),
+                },
+                Fixme::Stmt(stmts) => {
+                    if let Err(err) = stmts.resolve(env) {
+                        println!("Error: {:?}", err);
+                    }
+                }
+                Fixme::Cmd(Cmd::Env) => {
+                    print!("{}", env);
+                }
+            }
+        }
+        Err(_errors) => {
+            println!("Error: Invalid syntax");
+            // for error in errors {
+            //     println!("{}", error)
+            // }
+        }
+    }
+}
+
+const HISTDIR: &'static str = "grapl";
+const HISTFILE: &'static str = "grapl.history";
+
+fn load_history(rl: &mut Editor<(), FileHistory>) {
+    with_histfile(rl, |rl, path| {
+        rl.load_history(path).ok();
+    });
+}
+
+fn save_history(rl: &mut Editor<(), FileHistory>) {
+    with_histfile(rl, |rl, path| {
+        rl.save_history(path).ok();
+    });
+}
+
+fn with_histfile<F>(rl: &mut Editor<(), FileHistory>, func: F)
+where
+    F: Fn(&mut Editor<(), FileHistory>, &PathBuf),
+{
+    if let Ok(mut path) = get_xdg_state_dir() {
+        path.push(HISTDIR);
+        if fs::create_dir_all(&path).is_ok() {
+            path.push(HISTFILE);
+            func(rl, &path)
+        }
+    }
 }
 
 fn get_xdg_state_dir() -> Result<PathBuf, XdgError> {
