@@ -132,7 +132,7 @@ impl<'src> Expr {
 }
 
 #[cfg(feature = "petgraph")]
-impl Into<Graph<Node, ()>> for Expr {
+impl Into<Graph<Node, ()>> for &Expr {
     fn into(self) -> Graph<Node, ()> {
         let mut graph: Graph<Node, _> = Graph::new();
         for node in self.nodes() {

@@ -1,6 +1,8 @@
 use chumsky::prelude::*;
+#[cfg(feature = "petgraph")]
+use grapl::Node;
 use grapl::resolve::{Config, Env};
-use grapl::{Expr, Node, Normalize, Parse, Resolve, Stmt};
+use grapl::{Expr, Normalize, Parse, Resolve, Stmt};
 use microxdg::{Xdg, XdgError};
 #[cfg(feature = "petgraph")]
 use petgraph::{
@@ -10,7 +12,10 @@ use petgraph::{
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
-use std::fs::{self, File};
+use std::fs;
+#[cfg(feature = "petgraph")]
+use std::fs::File;
+#[cfg(feature = "petgraph")]
 use std::io::prelude::*;
 use std::path::PathBuf;
 
@@ -57,7 +62,7 @@ enum Fixme {
 enum Cmd {
     Env,
     #[cfg(feature = "petgraph")]
-    Viz(Node, Option<PathBuf>),
+    Viz(Expr, Option<PathBuf>),
 }
 
 fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
@@ -66,7 +71,7 @@ fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
     let env = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
     #[cfg(feature = "petgraph")]
     let viz = just("!viz ")
-        .then(Node::parser())
+        .then(Expr::parser())
         .padded()
         .then(any().repeated().collect().map(|p: String| {
             if p == "" {
@@ -75,7 +80,7 @@ fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
                 Some(PathBuf::from(p))
             }
         }))
-        .map(|((_, node), path)| Fixme::Cmd(Cmd::Viz(node, path)));
+        .map(|((_, expr), path)| Fixme::Cmd(Cmd::Viz(expr, path)));
 
     #[cfg(feature = "petgraph")]
     {
@@ -104,19 +109,14 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
                     print!("{}", env);
                 }
                 #[cfg(feature = "petgraph")]
-                Fixme::Cmd(Cmd::Viz(node, save)) => {
-                    let graph: Graph<Node, ()> = env.lookup(&node).into();
-                    let dot = Dot::with_config(&graph, &[DotConfig::EdgeNoLabel]);
-                    if let Some(path) = save {
-                        if let Ok(mut file) = File::create(&path) {
-                            if file.write_all(format!("{:?}", dot).as_bytes()).is_err() {
-                                print!("Failed to write to {}", path.display());
-                            }
-                        }
-                    } else {
-                        print!("{:?}", dot);
+                Fixme::Cmd(Cmd::Viz(expr, save)) => match expr.resolve(env) {
+                    Ok(resolved) => {
+                        handle_viz(&resolved, save);
                     }
-                }
+                    Err(err) => {
+                        println!("Error: {:?}", err);
+                    }
+                },
             }
         }
         Err(_errors) => {
@@ -125,6 +125,21 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
             //     println!("{}", error)
             // }
         }
+    }
+}
+
+#[cfg(feature = "petgraph")]
+fn handle_viz(expr: &Expr, save: Option<PathBuf>) {
+    let graph: Graph<Node, ()> = expr.into();
+    let dot = Dot::with_config(&graph, &[DotConfig::EdgeNoLabel]);
+    if let Some(path) = save {
+        if let Ok(mut file) = File::create(&path) {
+            if file.write_all(format!("{:?}", dot).as_bytes()).is_err() {
+                print!("Failed to write to {}", path.display());
+            }
+        }
+    } else {
+        print!("{:?}", dot);
     }
 }
 
