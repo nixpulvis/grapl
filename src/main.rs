@@ -69,20 +69,20 @@ impl Cmd {
         let env = just("!env").padded().map(|_| Cmd::Env);
 
         #[cfg(feature = "petgraph")]
-        let viz = just("!viz ")
-            .then(Expr::parser())
-            .padded()
-            .then(any().repeated().collect().map(|p: String| {
+        {
+            let path = any().repeated().collect().map(|p: String| {
                 if p == "" {
                     None
                 } else {
                     Some(PathBuf::from(p))
                 }
-            }))
-            .map(|((_, expr), path)| Cmd::Viz(expr, path));
+            });
+            let viz = just("!viz ")
+                .then(Expr::parser())
+                .padded()
+                .then(path)
+                .map(|((_, e), p)| Cmd::Viz(e, p));
 
-        #[cfg(feature = "petgraph")]
-        {
             env.or(viz)
         }
 
