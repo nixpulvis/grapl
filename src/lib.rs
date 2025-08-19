@@ -121,11 +121,12 @@ impl<'src> Expr {
         }
     }
 
-    pub fn contains_node(&self, node: &Node) -> bool {
+    /// Returns true if the given node is anywhere inside this expression.
+    pub fn contains(&self, node: &Node) -> bool {
         match self {
             Expr::Node(n) => node == n,
             Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
-                exprs.iter().any(|e| e.contains_node(node))
+                exprs.iter().any(|e| e.contains(node))
             }
         }
     }
@@ -356,13 +357,16 @@ mod tests {
     }
 
     #[test]
-    fn contains_node_expr() {
+    fn contains_expr() {
+        assert!(!Expr::parser().parse("{}").unwrap().contains(&node!(A)));
+        assert!(!Expr::parser().parse("[]").unwrap().contains(&node!(A)));
+        assert!(!Expr::parser().parse("[A]").unwrap().contains(&node!(B)));
         assert!(
             Expr::parser()
                 .parse("{A, {B, [C, D]}, {E, F}}")
                 .unwrap()
-                .contains_node(&node!(C))
-        )
+                .contains(&node!(C))
+        );
     }
 
     #[test]

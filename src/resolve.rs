@@ -94,7 +94,7 @@ impl<'cfg> Env<'cfg> {
     pub fn insert(&mut self, node: Node, expr: Expr) -> Result<(), Error> {
         if !self.1.shadowing && self.0.contains_key(&node) {
             Err(Error::Shadowing)
-        } else if !self.1.recursion && expr.contains_node(&node) {
+        } else if !self.1.recursion && expr.contains(&node) {
             Err(Error::Recursion)
         } else {
             self.0.insert(node, expr);
