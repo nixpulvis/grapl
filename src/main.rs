@@ -64,30 +64,40 @@ enum Cmd {
     Viz(Expr, Option<PathBuf>),
 }
 
+impl Cmd {
+    fn parser<'src>() -> impl Parser<'src, &'src str, Cmd> {
+        let env = just("!env").padded().map(|_| Cmd::Env);
+
+        #[cfg(feature = "petgraph")]
+        let viz = just("!viz ")
+            .then(Expr::parser())
+            .padded()
+            .then(any().repeated().collect().map(|p: String| {
+                if p == "" {
+                    None
+                } else {
+                    Some(PathBuf::from(p))
+                }
+            }))
+            .map(|((_, expr), path)| Cmd::Viz(expr, path));
+
+        #[cfg(feature = "petgraph")]
+        {
+            env.or(viz)
+        }
+
+        #[cfg(not(feature = "petgraph"))]
+        {
+            env
+        }
+    }
+}
+
 fn repl_parser<'src>() -> impl Parser<'src, &'src str, Input> {
     let stmt = Stmt::parser().map(|s| Input::Stmt(s));
     let expr = Expr::parser().map(|e| Input::Expr(e));
-    let env = just("!env").padded().map(|_| Input::Cmd(Cmd::Env));
-    #[cfg(feature = "petgraph")]
-    let viz = just("!viz ")
-        .then(Expr::parser())
-        .padded()
-        .then(any().repeated().collect().map(|p: String| {
-            if p == "" {
-                None
-            } else {
-                Some(PathBuf::from(p))
-            }
-        }))
-        .map(|((_, expr), path)| Input::Cmd(Cmd::Viz(expr, path)));
-
-    #[cfg(feature = "petgraph")]
-    {
-        choice((stmt, expr, env, viz))
-    }
-
-    #[cfg(not(feature = "petgraph"))]
-    choice((stmt, expr, env))
+    let cmd = Cmd::parser().map(|c| Input::Cmd(c));
+    choice((stmt, expr, cmd))
 }
 
 fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<(), FileHistory>) {
