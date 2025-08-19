@@ -52,8 +52,7 @@ fn main() -> rustyline::Result<()> {
     Ok(())
 }
 
-// TODO: This should be in lib in some way.
-enum Fixme {
+enum Input {
     Expr(Expr),
     Stmt(Stmt),
     Cmd(Cmd),
@@ -65,10 +64,10 @@ enum Cmd {
     Viz(Expr, Option<PathBuf>),
 }
 
-fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
-    let stmt = Stmt::parser().map(|s| Fixme::Stmt(s));
-    let expr = Expr::parser().map(|e| Fixme::Expr(e));
-    let env = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
+fn repl_parser<'src>() -> impl Parser<'src, &'src str, Input> {
+    let stmt = Stmt::parser().map(|s| Input::Stmt(s));
+    let expr = Expr::parser().map(|e| Input::Expr(e));
+    let env = just("!env").padded().map(|_| Input::Cmd(Cmd::Env));
     #[cfg(feature = "petgraph")]
     let viz = just("!viz ")
         .then(Expr::parser())
@@ -80,7 +79,7 @@ fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
                 Some(PathBuf::from(p))
             }
         }))
-        .map(|((_, expr), path)| Fixme::Cmd(Cmd::Viz(expr, path)));
+        .map(|((_, expr), path)| Input::Cmd(Cmd::Viz(expr, path)));
 
     #[cfg(feature = "petgraph")]
     {
@@ -93,23 +92,23 @@ fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
 
 fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<(), FileHistory>) {
     match repl_parser().parse(&line).into_result() {
-        Ok(fixme) => {
+        Ok(input) => {
             rl.add_history_entry(&line).unwrap();
-            match fixme {
-                Fixme::Expr(expr) => match expr.resolve(env) {
+            match input {
+                Input::Expr(expr) => match expr.resolve(env) {
                     Ok(expr) => println!("{}", expr.normalize()),
                     Err(err) => println!("Error: {:?}", err),
                 },
-                Fixme::Stmt(stmts) => {
+                Input::Stmt(stmts) => {
                     if let Err(err) = stmts.resolve(env) {
                         println!("Error: {:?}", err);
                     }
                 }
-                Fixme::Cmd(Cmd::Env) => {
+                Input::Cmd(Cmd::Env) => {
                     print!("{}", env);
                 }
                 #[cfg(feature = "petgraph")]
-                Fixme::Cmd(Cmd::Viz(expr, save)) => match expr.resolve(env) {
+                Input::Cmd(Cmd::Viz(expr, save)) => match expr.resolve(env) {
                     Ok(resolved) => {
                         handle_viz(&resolved, save);
                     }
