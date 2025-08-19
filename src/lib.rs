@@ -1,4 +1,8 @@
 use chumsky::prelude::*;
+use itertools::Itertools;
+#[cfg(feature = "petgraph")]
+use petgraph::Graph;
+use std::hash::Hash;
 
 /// Parsing for syntax elements.
 ///
@@ -19,7 +23,7 @@ where
 /// Nodes used as base indentifiers or to refer to other graphs.
 ///
 /// Examples of nodes: `A`, `a`, `G1`...
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Node(String);
 
 impl<'src> Parse<'src> for Node {
@@ -76,25 +80,77 @@ impl<'src> Parse<'src> for Expr {
 }
 
 impl<'src> Expr {
+    /// Retrurns the **sorted** list of nodes for this expression.
     pub fn nodes(&self) -> Vec<Node> {
         match self {
             Expr::Node(node) => vec![node.clone()],
-            Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
-                exprs.iter().fold(vec![], |mut v, e| {
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) => exprs
+                .iter()
+                .fold(vec![], |mut v, e| {
                     v.append(&mut e.nodes());
                     v
                 })
+                .into_iter()
+                .sorted()
+                .dedup()
+                .collect(),
+        }
+    }
+
+    /// Retrurns the **sorted** list of edges for this expression.
+    pub fn edges(&self) -> Vec<(Node, Node)> {
+        match self.normalize() {
+            Self::Node(_) => vec![],
+            // TODO: directed vs undirected...
+            expr @ Self::Connected(_) => expr
+                .nodes()
+                .iter()
+                .cartesian_product(expr.nodes().iter())
+                .map(|(a, b)| (a.clone(), b.clone()))
+                .sorted()
+                .filter(|(a, b)| a != b)
+                .dedup()
+                .collect(),
+            Self::Disconnected(exprs) => {
+                let mut edges = vec![];
+                for expr in exprs {
+                    edges.append(&mut expr.edges());
+                }
+                edges.into_iter().sorted().dedup().collect()
             }
         }
     }
 
-    pub fn contains_node(&self, node: &Node) -> bool {
+    /// Returns true if the given node is anywhere inside this expression.
+    pub fn contains(&self, node: &Node) -> bool {
         match self {
             Expr::Node(n) => node == n,
             Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
-                exprs.iter().any(|e| e.contains_node(node))
+                exprs.iter().any(|e| e.contains(node))
             }
         }
+    }
+}
+
+#[cfg(feature = "petgraph")]
+impl Into<Graph<Node, ()>> for &Expr {
+    fn into(self) -> Graph<Node, ()> {
+        let mut graph: Graph<Node, _> = Graph::new();
+        for node in self.nodes() {
+            graph.add_node(node);
+        }
+        for (a, b) in self.edges() {
+            let ia = graph
+                .node_indices()
+                .find(|idx| a == *graph.node_weight(*idx).unwrap())
+                .unwrap();
+            let ib = graph
+                .node_indices()
+                .find(|idx| b == *graph.node_weight(*idx).unwrap())
+                .unwrap();
+            graph.add_edge(ia, ib, ());
+        }
+        graph
     }
 }
 
@@ -191,6 +247,7 @@ pub use self::resolve::Resolve;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     macro_rules! node {
         ($id:ident) => {
@@ -267,16 +324,49 @@ mod tests {
             Expr::parser().parse("{A, [B, C], D}").unwrap().nodes(),
             vec![node!(A), node!(B), node!(C), node!(D)]
         );
+        assert_eq!(
+            Expr::parser()
+                .parse("[{A,B},{B,C},{C,D},{D,A}]")
+                .unwrap()
+                .nodes(),
+            vec![node!(A), node!(B), node!(C), node!(D)]
+        );
     }
 
     #[test]
-    fn contains_node_expr() {
+    fn edges_expr() {
+        assert_eq!(
+            Expr::parser().parse("{A, [C, B], D}").unwrap().edges(),
+            vec![
+                (node!(A), node!(B)),
+                (node!(A), node!(C)),
+                (node!(A), node!(D)),
+                (node!(B), node!(A)),
+                (node!(B), node!(D)),
+                (node!(C), node!(A)),
+                (node!(C), node!(D)),
+                (node!(D), node!(A)),
+                (node!(D), node!(B)),
+                (node!(D), node!(C)),
+            ]
+        );
+        assert_eq!(
+            Expr::parser().parse("[{A,B}, {A,B}]").unwrap().edges(),
+            vec![(node!(A), node!(B)), (node!(B), node!(A)),]
+        );
+    }
+
+    #[test]
+    fn contains_expr() {
+        assert!(!Expr::parser().parse("{}").unwrap().contains(&node!(A)));
+        assert!(!Expr::parser().parse("[]").unwrap().contains(&node!(A)));
+        assert!(!Expr::parser().parse("[A]").unwrap().contains(&node!(B)));
         assert!(
             Expr::parser()
                 .parse("{A, {B, [C, D]}, {E, F}}")
                 .unwrap()
-                .contains_node(&node!(C))
-        )
+                .contains(&node!(C))
+        );
     }
 
     #[test]

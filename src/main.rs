@@ -1,12 +1,22 @@
-use chumsky::Parser;
-use chumsky::prelude::just;
+use chumsky::prelude::*;
+#[cfg(feature = "petgraph")]
+use grapl::Node;
 use grapl::resolve::{Config, Env};
 use grapl::{Expr, Normalize, Parse, Resolve, Stmt};
 use microxdg::{Xdg, XdgError};
+#[cfg(feature = "petgraph")]
+use petgraph::{
+    dot::{Config as DotConfig, Dot},
+    graph::Graph,
+};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
 use std::fs;
+#[cfg(feature = "petgraph")]
+use std::fs::File;
+#[cfg(feature = "petgraph")]
+use std::io::prelude::*;
 use std::path::PathBuf;
 
 fn main() -> rustyline::Result<()> {
@@ -42,8 +52,7 @@ fn main() -> rustyline::Result<()> {
     Ok(())
 }
 
-// TODO: This should be in lib in some way.
-enum Fixme {
+enum Input {
     Expr(Expr),
     Stmt(Stmt),
     Cmd(Cmd),
@@ -51,32 +60,72 @@ enum Fixme {
 
 enum Cmd {
     Env,
+    #[cfg(feature = "petgraph")]
+    Viz(Expr, Option<PathBuf>),
 }
 
-fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
-    let stmt = Stmt::parser().map(|s| Fixme::Stmt(s));
-    let expr = Expr::parser().map(|e| Fixme::Expr(e));
-    let cmd = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
-    stmt.or(expr).or(cmd)
+impl Cmd {
+    fn parser<'src>() -> impl Parser<'src, &'src str, Cmd> {
+        let env = just("!env").padded().map(|_| Cmd::Env);
+
+        #[cfg(feature = "petgraph")]
+        {
+            let path = any().repeated().collect().map(|p: String| {
+                if p == "" {
+                    None
+                } else {
+                    Some(PathBuf::from(p))
+                }
+            });
+            let viz = just("!viz ")
+                .then(Expr::parser())
+                .padded()
+                .then(path)
+                .map(|((_, e), p)| Cmd::Viz(e, p));
+
+            env.or(viz)
+        }
+
+        #[cfg(not(feature = "petgraph"))]
+        {
+            env
+        }
+    }
+}
+
+fn repl_parser<'src>() -> impl Parser<'src, &'src str, Input> {
+    let stmt = Stmt::parser().map(|s| Input::Stmt(s));
+    let expr = Expr::parser().map(|e| Input::Expr(e));
+    let cmd = Cmd::parser().map(|c| Input::Cmd(c));
+    choice((stmt, expr, cmd))
 }
 
 fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<(), FileHistory>) {
     match repl_parser().parse(&line).into_result() {
-        Ok(fixme) => {
+        Ok(input) => {
             rl.add_history_entry(&line).unwrap();
-            match fixme {
-                Fixme::Expr(expr) => match expr.resolve(env) {
+            match input {
+                Input::Expr(expr) => match expr.resolve(env) {
                     Ok(expr) => println!("{}", expr.normalize()),
                     Err(err) => println!("Error: {:?}", err),
                 },
-                Fixme::Stmt(stmts) => {
+                Input::Stmt(stmts) => {
                     if let Err(err) = stmts.resolve(env) {
                         println!("Error: {:?}", err);
                     }
                 }
-                Fixme::Cmd(Cmd::Env) => {
+                Input::Cmd(Cmd::Env) => {
                     print!("{}", env);
                 }
+                #[cfg(feature = "petgraph")]
+                Input::Cmd(Cmd::Viz(expr, save)) => match expr.resolve(env) {
+                    Ok(resolved) => {
+                        handle_viz(&resolved, save);
+                    }
+                    Err(err) => {
+                        println!("Error: {:?}", err);
+                    }
+                },
             }
         }
         Err(_errors) => {
@@ -85,6 +134,26 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
             //     println!("{}", error)
             // }
         }
+    }
+}
+
+#[cfg(feature = "petgraph")]
+fn handle_viz(expr: &Expr, save: Option<PathBuf>) {
+    let graph: Graph<Node, ()> = expr.into();
+    let dot = Dot::with_attr_getters(
+        &graph,
+        &[DotConfig::NodeNoLabel, DotConfig::EdgeNoLabel],
+        &|_, _| "".into(),
+        &|_, (_, node)| format!("label = \"{}\"", node),
+    );
+    if let Some(path) = save {
+        if let Ok(mut file) = File::create(&path) {
+            if file.write_all(format!("{:?}", dot).as_bytes()).is_err() {
+                print!("Failed to write to {}", path.display());
+            }
+        }
+    } else {
+        print!("{:?}", dot);
     }
 }
 
