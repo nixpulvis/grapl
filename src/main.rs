@@ -140,7 +140,12 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
 #[cfg(feature = "petgraph")]
 fn handle_viz(expr: &Expr, save: Option<PathBuf>) {
     let graph: Graph<Node, ()> = expr.into();
-    let dot = Dot::with_config(&graph, &[DotConfig::EdgeNoLabel]);
+    let dot = Dot::with_attr_getters(
+        &graph,
+        &[DotConfig::NodeNoLabel, DotConfig::EdgeNoLabel],
+        &|_, _| "".into(),
+        &|_, (_, node)| format!("label = \"{}\"", node),
+    );
     if let Some(path) = save {
         if let Ok(mut file) = File::create(&path) {
             if file.write_all(format!("{:?}", dot).as_bytes()).is_err() {
