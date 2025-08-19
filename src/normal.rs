@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{Expr, Ret, Stmt};
 
 /// Reductions to normal form.
@@ -11,12 +13,12 @@ use crate::{Expr, Ret, Stmt};
 /// {[A, B], [C, D]} =>
 /// [{A, C}, {A, D}, {B, C}, {B, D}]
 /// ```
-pub trait Normalize {
+pub trait Normalize: Sized {
     fn normalize(&self) -> Self;
 }
 
-impl<'src> Normalize for Expr {
-    fn normalize(&self) -> Self {
+impl Expr {
+    fn flatten(&self) -> Self {
         match self {
             Expr::Node(node) => Expr::Node(node.clone()),
             Expr::Connected(exprs) => {
@@ -129,6 +131,57 @@ impl<'src> Normalize for Expr {
             }
         }
     }
+
+    // This only works on normalized expressions.
+    fn dedup(&self) -> Self {
+        macro_rules! dedup_exprs {
+            ($varient:path, $exprs:expr) => {{
+                let mut fresh = Vec::new();
+                for expr in $exprs {
+                    enum Action {
+                        Insert,
+                        Swap,
+                        Skip,
+                    }
+                    let mut action = Action::Insert;
+                    for f in fresh.iter() {
+                        if expr.is_norm_subgraph(&f) {
+                            action = Action::Skip;
+                        } else if f.is_norm_subgraph(expr) {
+                            action = Action::Swap;
+                        }
+                    }
+                    match action {
+                        Action::Insert => {
+                            fresh.push(expr.clone());
+                        }
+                        Action::Swap => {
+                            fresh.remove(fresh.len() - 1);
+                            fresh.push(expr.clone());
+                        }
+                        Action::Skip => {}
+                    }
+                }
+                $varient(fresh)
+            }};
+        }
+        match self {
+            e @ Expr::Node(_) => e.clone(),
+            Expr::Connected(exprs) => dedup_exprs!(Expr::Connected, exprs),
+            Expr::Disconnected(exprs) => dedup_exprs!(Expr::Disconnected, exprs),
+        }
+    }
+
+    fn is_norm_subgraph(&self, other: &Self) -> bool {
+        let set: HashSet<_> = other.nodes().iter().cloned().collect();
+        self.nodes().iter().all(|node| set.contains(node))
+    }
+}
+
+impl Normalize for Expr {
+    fn normalize(&self) -> Self {
+        self.flatten().dedup().flatten()
+    }
 }
 
 impl<'src> Normalize for Stmt {
@@ -139,7 +192,7 @@ impl<'src> Normalize for Stmt {
     }
 }
 
-impl<'src> Normalize for Ret {
+impl Normalize for Ret {
     fn normalize(&self) -> Self {
         let norm_stmts = self.0.iter().map(Normalize::normalize).collect();
         let norm_expr = self.1.normalize();
@@ -175,6 +228,55 @@ mod tests {
         assert_eq!(
             Expr::parse("{}").unwrap().normalize(),
             Expr::parse("[]").unwrap(),
+        );
+    }
+
+    #[test]
+    fn dedup_expr() {
+        assert_eq!(Expr::parse("A").unwrap().dedup(), Expr::parse("A").unwrap(),);
+        assert_eq!(
+            Expr::parse("[]").unwrap().dedup(),
+            Expr::parse("[]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{}").unwrap().dedup(),
+            Expr::parse("{}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{A,A}").unwrap().dedup(),
+            Expr::parse("{A}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{A,A,B}").unwrap().dedup(),
+            Expr::parse("{A,B}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{{A},{A}}").unwrap().dedup(),
+            Expr::parse("{{A}}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{{A,B},{A,B}}").unwrap().dedup(),
+            Expr::parse("{{A,B}}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{{A,B},{A,B,C}}").unwrap().dedup(),
+            Expr::parse("{{A,B,C}}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{{A,B},{A,B,C},A,{C,D},{C,D,E}}")
+                .unwrap()
+                .dedup(),
+            Expr::parse("{{A,B,C},{C,D,E}}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[A,{A,B}]").unwrap().dedup(),
+            Expr::parse("[{A,B}]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[{A,B},{A,B,C},A,{C,D},{C,D,E}]")
+                .unwrap()
+                .dedup(),
+            Expr::parse("[{A,B,C},{C,D,E}]").unwrap(),
         );
     }
 
@@ -285,10 +387,21 @@ mod tests {
                 )
                 .unwrap(),
         );
+
+        assert_eq!(
+            Expr::parse("[A,{A,B},[A]]").unwrap().normalize(),
+            Expr::parse("{A,B}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{{A,B},{A,B,C},A,{C,D},{C,D,E}}")
+                .unwrap()
+                .normalize(),
+            Expr::parse("{A,B,C,D,E}").unwrap(),
+        );
     }
 
     #[test]
-    fn normalize_disjoint_stmts() {
+    fn normalize_stmts() {
         assert_eq!(
             Vec::<Stmt>::parser()
                 .parse(

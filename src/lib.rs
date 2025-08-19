@@ -76,6 +76,18 @@ impl<'src> Parse<'src> for Expr {
 }
 
 impl<'src> Expr {
+    pub fn nodes(&self) -> Vec<Node> {
+        match self {
+            Expr::Node(node) => vec![node.clone()],
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
+                exprs.iter().fold(vec![], |mut v, e| {
+                    v.append(&mut e.nodes());
+                    v
+                })
+            }
+        }
+    }
+
     pub fn contains_node(&self, node: &Node) -> bool {
         match self {
             Expr::Node(n) => node == n,
@@ -247,6 +259,14 @@ mod tests {
                 Expr::Disconnected(vec![enode!(C), enode!(D)])
             ]))
         )
+    }
+
+    #[test]
+    fn nodes_expr() {
+        assert_eq!(
+            Expr::parser().parse("{A, [B, C], D}").unwrap().nodes(),
+            vec![node!(A), node!(B), node!(C), node!(D)]
+        );
     }
 
     #[test]
