@@ -80,6 +80,7 @@ impl<'src> Parse<'src> for Expr {
 }
 
 impl<'src> Expr {
+    /// Retrurns the **sorted** list of nodes for this expression.
     pub fn nodes(&self) -> Vec<Node> {
         match self {
             Expr::Node(node) => vec![node.clone()],
@@ -96,17 +97,18 @@ impl<'src> Expr {
         }
     }
 
+    /// Retrurns the **sorted** list of edges for this expression.
     pub fn edges(&self) -> Vec<(Node, Node)> {
         match self.normalize() {
             Self::Node(_) => vec![],
             // TODO: directed vs undirected...
-            e @ Self::Connected(_) => e
+            expr @ Self::Connected(_) => expr
                 .nodes()
                 .iter()
-                .cartesian_product(e.nodes().iter())
+                .cartesian_product(expr.nodes().iter())
                 .map(|(a, b)| (a.clone(), b.clone()))
-                .filter(|(a, b)| a != b)
                 .sorted()
+                .filter(|(a, b)| a != b)
                 .dedup()
                 .collect(),
             Self::Disconnected(exprs) => {
@@ -332,11 +334,8 @@ mod tests {
 
     #[test]
     fn edges_expr() {
-        for edge in Expr::parser().parse("{A, [B, C], D}").unwrap().edges() {
-            println!("({}, {})", edge.0, edge.1);
-        }
         assert_eq!(
-            Expr::parser().parse("{A, [B, C], D}").unwrap().edges(),
+            Expr::parser().parse("{A, [C, B], D}").unwrap().edges(),
             vec![
                 (node!(A), node!(B)),
                 (node!(A), node!(C)),
@@ -349,6 +348,10 @@ mod tests {
                 (node!(D), node!(B)),
                 (node!(D), node!(C)),
             ]
+        );
+        assert_eq!(
+            Expr::parser().parse("[{A,B}, {A,B}]").unwrap().edges(),
+            vec![(node!(A), node!(B)), (node!(B), node!(A)),]
         );
     }
 
