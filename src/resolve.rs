@@ -27,7 +27,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            // TODO: Is the right default?
             shadowing: false,
             recursion: false,
         }
@@ -47,8 +46,8 @@ impl Config {
         self
     }
 
-    /// TODO
-    pub fn with_recursion(mut self) -> Self {
+    #[allow(unused)]
+    fn with_recursion(mut self) -> Self {
         self.recursion = true;
         self
     }
@@ -314,17 +313,15 @@ mod tests {
         assert_eq!(
             Vec::<Stmt>::parse(
                 r#"
-                    G = {G, X}
+                    G = {G[2], X}
                 "#
             )
             .unwrap()
             .resolve(&mut env)
             .unwrap(),
-            // TODO: Handle multi-step resolution and proper recursion end
-            // conditions.
             Vec::<Stmt>::parse(
                 r#"
-                    G = {{G..., X}, X}
+                    G = {{{G, X}, X}, X}
                 "#
             )
             .unwrap(),
@@ -340,8 +337,9 @@ mod tests {
         assert_eq!(
             Vec::<Stmt>::parse(
                 r#"
-                    G1 = {G2, X}
-                    G2 = {G1, Y}
+                    G1 = {G2[1], X}
+                    G2 = {G1[1], Y}
+
                 "#
             )
             .unwrap()
@@ -349,8 +347,27 @@ mod tests {
             .unwrap(),
             Vec::<Stmt>::parse(
                 r#"
-                    G1 = {{G1..., Y}, X}
-                    G2 = {{G2..., X}, Y}
+                    G1 = {{{G2, X}, Y}, X}
+                    G2 = {{{G1, Y}, X}, Y}
+                "#
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(
+            Vec::<Stmt>::parse(
+                r#"
+                    G1 = {G2[2], X}
+                    G2 = {G1[1], Y}
+                "#
+            )
+            .unwrap()
+            .resolve(&mut env)
+            .unwrap(),
+            Vec::<Stmt>::parse(
+                r#"
+                    G1 = {{{{G1, Y}, X}, Y}, X}
+                    G2 = {{{G1, Y}, X}, Y}
                 "#
             )
             .unwrap(),
@@ -382,11 +399,11 @@ mod tests {
         let config = Config::default().with_recursion().with_shadowing();
         let mut env = Env::new(&config);
 
-        // This is going to eventually be an error in one way or another.
         assert_eq!(
             Vec::<Stmt>::parse(
                 r#"
                     G1 = G2
+                    G1 = A
                     G2 = G1
                 "#
             )
@@ -395,8 +412,9 @@ mod tests {
             .unwrap(),
             Vec::<Stmt>::parse(
                 r#"
-                    G1 = G2...
-                    G2 = G1...
+                    G1 = G2
+                    G1 = A
+                    G2 = A
                 "#
             )
             .unwrap(),
