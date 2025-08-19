@@ -1,4 +1,8 @@
 use chumsky::prelude::*;
+use itertools::Itertools;
+#[cfg(feature = "petgraph")]
+use petgraph::Graph;
+use std::hash::Hash;
 
 /// Parsing for syntax elements.
 ///
@@ -19,7 +23,7 @@ where
 /// Nodes used as base indentifiers or to refer to other graphs.
 ///
 /// Examples of nodes: `A`, `a`, `G1`...
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Node(String);
 
 impl<'src> Parse<'src> for Node {
@@ -79,11 +83,38 @@ impl<'src> Expr {
     pub fn nodes(&self) -> Vec<Node> {
         match self {
             Expr::Node(node) => vec![node.clone()],
-            Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
-                exprs.iter().fold(vec![], |mut v, e| {
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) => exprs
+                .iter()
+                .fold(vec![], |mut v, e| {
                     v.append(&mut e.nodes());
                     v
                 })
+                .into_iter()
+                .sorted()
+                .dedup()
+                .collect(),
+        }
+    }
+
+    pub fn edges(&self) -> Vec<(Node, Node)> {
+        match self.normalize() {
+            Self::Node(_) => vec![],
+            // TODO: directed vs undirected...
+            e @ Self::Connected(_) => e
+                .nodes()
+                .iter()
+                .cartesian_product(e.nodes().iter())
+                .map(|(a, b)| (a.clone(), b.clone()))
+                .filter(|(a, b)| a != b)
+                .sorted()
+                .dedup()
+                .collect(),
+            Self::Disconnected(exprs) => {
+                let mut edges = vec![];
+                for expr in exprs {
+                    edges.append(&mut expr.edges());
+                }
+                edges.into_iter().sorted().dedup().collect()
             }
         }
     }
@@ -95,6 +126,28 @@ impl<'src> Expr {
                 exprs.iter().any(|e| e.contains_node(node))
             }
         }
+    }
+}
+
+#[cfg(feature = "petgraph")]
+impl Into<Graph<Node, ()>> for Expr {
+    fn into(self) -> Graph<Node, ()> {
+        let mut graph: Graph<Node, _> = Graph::new();
+        for node in self.nodes() {
+            graph.add_node(node);
+        }
+        for (a, b) in self.edges() {
+            let ia = graph
+                .node_indices()
+                .find(|idx| a == *graph.node_weight(*idx).unwrap())
+                .unwrap();
+            let ib = graph
+                .node_indices()
+                .find(|idx| b == *graph.node_weight(*idx).unwrap())
+                .unwrap();
+            graph.add_edge(ia, ib, ());
+        }
+        graph
     }
 }
 
@@ -191,6 +244,7 @@ pub use self::resolve::Resolve;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     macro_rules! node {
         ($id:ident) => {
@@ -266,6 +320,35 @@ mod tests {
         assert_eq!(
             Expr::parser().parse("{A, [B, C], D}").unwrap().nodes(),
             vec![node!(A), node!(B), node!(C), node!(D)]
+        );
+        assert_eq!(
+            Expr::parser()
+                .parse("[{A,B},{B,C},{C,D},{D,A}]")
+                .unwrap()
+                .nodes(),
+            vec![node!(A), node!(B), node!(C), node!(D)]
+        );
+    }
+
+    #[test]
+    fn edges_expr() {
+        for edge in Expr::parser().parse("{A, [B, C], D}").unwrap().edges() {
+            println!("({}, {})", edge.0, edge.1);
+        }
+        assert_eq!(
+            Expr::parser().parse("{A, [B, C], D}").unwrap().edges(),
+            vec![
+                (node!(A), node!(B)),
+                (node!(A), node!(C)),
+                (node!(A), node!(D)),
+                (node!(B), node!(A)),
+                (node!(B), node!(D)),
+                (node!(C), node!(A)),
+                (node!(C), node!(D)),
+                (node!(D), node!(A)),
+                (node!(D), node!(B)),
+                (node!(D), node!(C)),
+            ]
         );
     }
 

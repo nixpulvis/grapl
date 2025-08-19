@@ -3,9 +3,14 @@ name = "grapl"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+petgraph = ["dep:petgraph"]
+
 [dependencies]
 chumsky = "0.10"
+itertools = "0.14"
 microxdg = "0.2"
+petgraph = { version = "0.8", optional = true }
 rustyline = "17.0"
 
 [dev-dependencies]

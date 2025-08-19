@@ -1,12 +1,17 @@
-use chumsky::Parser;
-use chumsky::prelude::just;
+use chumsky::prelude::*;
 use grapl::resolve::{Config, Env};
-use grapl::{Expr, Normalize, Parse, Resolve, Stmt};
+use grapl::{Expr, Node, Normalize, Parse, Resolve, Stmt};
 use microxdg::{Xdg, XdgError};
+#[cfg(feature = "petgraph")]
+use petgraph::{
+    dot::{Config as DotConfig, Dot},
+    graph::Graph,
+};
 use rustyline::error::ReadlineError;
 use rustyline::history::FileHistory;
 use rustyline::{DefaultEditor, Editor};
-use std::fs;
+use std::fs::{self, File};
+use std::io::prelude::*;
 use std::path::PathBuf;
 
 fn main() -> rustyline::Result<()> {
@@ -51,13 +56,34 @@ enum Fixme {
 
 enum Cmd {
     Env,
+    #[cfg(feature = "petgraph")]
+    Viz(Node, Option<PathBuf>),
 }
 
 fn repl_parser<'src>() -> impl Parser<'src, &'src str, Fixme> {
     let stmt = Stmt::parser().map(|s| Fixme::Stmt(s));
     let expr = Expr::parser().map(|e| Fixme::Expr(e));
-    let cmd = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
-    stmt.or(expr).or(cmd)
+    let env = just("!env").padded().map(|_| Fixme::Cmd(Cmd::Env));
+    #[cfg(feature = "petgraph")]
+    let viz = just("!viz ")
+        .then(Node::parser())
+        .padded()
+        .then(any().repeated().collect().map(|p: String| {
+            if p == "" {
+                None
+            } else {
+                Some(PathBuf::from(p))
+            }
+        }))
+        .map(|((_, node), path)| Fixme::Cmd(Cmd::Viz(node, path)));
+
+    #[cfg(feature = "petgraph")]
+    {
+        choice((stmt, expr, env, viz))
+    }
+
+    #[cfg(not(feature = "petgraph"))]
+    choice((stmt, expr, env))
 }
 
 fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<(), FileHistory>) {
@@ -76,6 +102,20 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
                 }
                 Fixme::Cmd(Cmd::Env) => {
                     print!("{}", env);
+                }
+                #[cfg(feature = "petgraph")]
+                Fixme::Cmd(Cmd::Viz(node, save)) => {
+                    let graph: Graph<Node, ()> = env.lookup(&node).into();
+                    let dot = Dot::with_config(&graph, &[DotConfig::EdgeNoLabel]);
+                    if let Some(path) = save {
+                        if let Ok(mut file) = File::create(&path) {
+                            if file.write_all(format!("{:?}", dot).as_bytes()).is_err() {
+                                print!("Failed to write to {}", path.display());
+                            }
+                        }
+                    } else {
+                        print!("{:?}", dot);
+                    }
                 }
             }
         }
