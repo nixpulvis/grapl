@@ -163,7 +163,7 @@ impl<'src> std::fmt::Display for Expr {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        match self.normalize() {
+        match self {
             Expr::Node(node) => write!(f, "{}", node),
             Expr::Connected(exprs) => write!(f, "{{{}}}", joined(&exprs)),
             Expr::Disconnected(exprs) => write!(f, "[{}]", joined(&exprs)),
@@ -376,7 +376,7 @@ mod tests {
                 .parse("{  A, {B  ,  [C,D]}  }")
                 .unwrap()
                 .to_string(),
-            "[{A, B, C}, {A, B, D}]"
+            "{A, {B, [C, D]}}"
         )
     }
 
