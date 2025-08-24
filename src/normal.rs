@@ -401,6 +401,18 @@ mod tests {
     }
 
     #[test]
+    fn disconnected_dups() {
+        assert_eq!(
+            Expr::parse("[N,[I,{N,[J]}]]").unwrap().normalize(),
+            Expr::parse("[N,I,{N,J}]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[N,I,{N,J}]").unwrap().dedup(),
+            Expr::parse("[I,{N,J}]").unwrap(),
+        );
+    }
+
+    #[test]
     fn normalize_stmts() {
         assert_eq!(
             Vec::<Stmt>::parser()
