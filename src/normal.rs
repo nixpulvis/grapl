@@ -59,28 +59,22 @@ impl Expr {
                         }
                         // dcs = [[A,B][C]]
                         // expr = [D,E]
-                        // dcs <= [[A,B,D],[C,D],[A,B,E],[C,E]]
+                        // dcs <= [[A,B,D],[A,B,E],[C,D],[C,E]]
                         Expr::Disconnected(dexprs) => {
                             let mut freshs = vec![];
-                            for dc in dcs.iter() {
-                                for dexpr in dexprs.iter() {
+                            for dexpr in dexprs.iter() {
+                                for dc in dcs.iter() {
                                     let mut fresh = dc.clone();
                                     match dexpr {
-                                        // This is kinda gnarly... but we need
-                                        // to flatten connected expressions
-                                        // inside disconnected expression. E.g:
-                                        // {A,[{B,C},D]}.
                                         e @ Expr::Node(_) => fresh.push(e.clone()),
                                         Expr::Connected(cs) => {
                                             for c in cs {
                                                 fresh.push(c.clone());
                                             }
                                         }
-                                        // This subexpression is normalized and
-                                        // therefore cannot have nested [[]].
                                         Expr::Disconnected(_) => unreachable!(),
                                     }
-                                    freshs.push(fresh.clone());
+                                    freshs.push(fresh);
                                 }
                             }
                             dcs = freshs;
@@ -168,7 +162,43 @@ impl Expr {
         match self {
             e @ Expr::Node(_) => e.clone(),
             Expr::Connected(exprs) => dedup_exprs!(Expr::Connected, exprs),
-            Expr::Disconnected(exprs) => dedup_exprs!(Expr::Disconnected, exprs),
+            Expr::Disconnected(exprs) => {
+                // Step 1: Collect all nodes present in any Connected sub-expression
+                let mut connected_nodes = HashSet::new();
+                for expr in exprs {
+                    if let Expr::Connected(subs) = expr {
+                        for node in subs.iter().flat_map(|e| e.nodes()) {
+                            connected_nodes.insert(node.clone());
+                        }
+                    }
+                }
+                eprintln!("DEBUG dedup: connected_nodes = {:?}", connected_nodes);
+                // Step 2: Filter out top-level Node(n) where n is in connected_nodes
+                let filtered_exprs: Vec<_> = exprs
+                    .iter()
+                    .filter(|expr| match expr {
+                        Expr::Node(n) if connected_nodes.contains(n) => false,
+                        _ => true,
+                    })
+                    .cloned()
+                    .collect();
+                eprintln!("DEBUG dedup: filtered_exprs = {:?}", filtered_exprs);
+                // Step 3: Dedup the remaining expressions as usual, preserving order
+                let mut fresh = Vec::new();
+                'outer: for expr in filtered_exprs {
+                    for (i, f) in fresh.iter().enumerate() {
+                        if expr.is_norm_subgraph(f) {
+                            continue 'outer;
+                        } else if f.is_norm_subgraph(&expr) {
+                            fresh[i] = expr.clone();
+                            continue 'outer;
+                        }
+                    }
+                    fresh.push(expr);
+                }
+                eprintln!("DEBUG dedup: final fresh = {:?}", fresh);
+                Expr::Disconnected(fresh)
+            }
         }
     }
 
@@ -180,7 +210,7 @@ impl Expr {
 
 impl Normalize for Expr {
     fn normalize(&self) -> Self {
-        self.flatten().dedup().flatten()
+        self.flatten()
     }
 }
 
