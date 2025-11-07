@@ -1,4 +1,3 @@
-use chumsky::container::Seq;
 use grapl::{Expr, Node, Parse, Stmt};
 use rand::distr::weighted::WeightedIndex;
 use rand::seq::IteratorRandom;
@@ -21,21 +20,47 @@ fn generate_delim_expr(
     left: char,
     right: char,
     node_max_len: usize,
-    depth: usize,
+    expr_max_len: usize,
+    expr_max_depth: usize,
     cweight: usize,
     dweight: usize,
 ) -> Expr {
-    let len = rand::rng().random_range(0..=depth * 4);
-    let seq = len
-        .seq_iter()
-        .fold(format!("{}", generate_node(node_max_len)), |s, _| {
-            let inner = if depth == 0 {
-                Expr::Node(generate_node(node_max_len))
-            } else {
-                generate_expr(node_max_len, depth - 1, cweight, dweight)
-            };
-            format!("{}, {}", s, inner)
-        });
+    let len = if expr_max_len == 0 {
+        0
+    } else {
+        rand::rng().random_range(0..=expr_max_len)
+    };
+    let seq = if len == 0 {
+        "".to_string()
+    } else {
+        (0..len - 1).fold(
+            format!(
+                "{}",
+                generate_expr(
+                    node_max_len,
+                    expr_max_len,
+                    rand::rng().random_range(0..=expr_max_depth),
+                    cweight,
+                    dweight
+                )
+            ),
+            |s, _| {
+                let inner_max_depth = rand::rng().random_range(0..=expr_max_depth);
+                let inner = if inner_max_depth == 0 {
+                    Expr::Node(generate_node(node_max_len))
+                } else {
+                    generate_expr(
+                        node_max_len,
+                        expr_max_len,
+                        inner_max_depth - 1,
+                        cweight,
+                        dweight,
+                    )
+                };
+                format!("{}, {}", s, inner)
+            },
+        )
+    };
     let expr_string = format!("{left}{seq}{right}");
     Expr::parse(&expr_string)
         .into_result()
@@ -43,14 +68,36 @@ fn generate_delim_expr(
 }
 
 #[allow(unused)]
-pub fn generate_expr(node_max_len: usize, depth: usize, cweight: usize, dweight: usize) -> Expr {
+pub fn generate_expr(
+    node_max_len: usize,
+    expr_max_len: usize,
+    expr_max_depth: usize,
+    cweight: usize,
+    dweight: usize,
+) -> Expr {
     let weights = [1, cweight, dweight];
     let dist = WeightedIndex::new(&weights).unwrap();
     let choice = rand::rng().sample(dist);
     match choice {
         0 => Expr::Node(generate_node(node_max_len)),
-        1 => generate_delim_expr('{', '}', node_max_len, depth, cweight, dweight),
-        _ => generate_delim_expr('[', ']', node_max_len, depth, cweight, dweight),
+        1 => generate_delim_expr(
+            '{',
+            '}',
+            node_max_len,
+            expr_max_len,
+            expr_max_depth,
+            cweight,
+            dweight,
+        ),
+        _ => generate_delim_expr(
+            '[',
+            ']',
+            node_max_len,
+            expr_max_len,
+            expr_max_depth,
+            cweight,
+            dweight,
+        ),
     }
 }
 
@@ -58,7 +105,8 @@ pub fn generate_expr(node_max_len: usize, depth: usize, cweight: usize, dweight:
 pub fn generate_stmts(
     node_max_len: usize,
     stmts_max_len: usize,
-    depth: usize,
+    expr_max_len: usize,
+    expr_max_depth: usize,
     cweight: usize,
     dweight: usize,
 ) -> Vec<Stmt> {
@@ -75,7 +123,10 @@ pub fn generate_stmts(
                     Stmt::Assign(node, _) => node.clone(),
                 })
         };
-        let stmt = Stmt::Assign(node, generate_expr(node_max_len, depth, cweight, dweight));
+        let stmt = Stmt::Assign(
+            node,
+            generate_expr(node_max_len, expr_max_len, expr_max_depth, cweight, dweight),
+        );
         stmts.push(stmt);
     }
     stmts
