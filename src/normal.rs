@@ -1,344 +1,170 @@
-//! Reductions to normal form.
+//! Normal forms.
 //!
-//! Normalizing rewrites an expression into a smaller one describing the same
-//! [`Graph`]:
+//! The normal form of an expression is computed from its [`Graph`] alone, so
+//! two expressions have the same normal form exactly when they describe the
+//! same graph, and normalizing twice is the same as normalizing once. It is a
+//! disconnected list of
 //!
-//! - Empty graphs are fully disconnected: `{} => []`, `() => []`
-//! - Single node graphs are just the node: `[{A}] => A`
-//! - Fully connected graphs are flattened: `{{A, B}, C} => {A, B, C}`
-//! - Directed graphs are flattened the same way, keeping their order:
-//!   `((A, B), C) => (A, B, C)`
-//! - Connected and directed expressions distribute over disconnected ones:
+//! - nodes without edges,
+//! - cliques `{...}` covering every edge that goes both ways, and
+//! - transitive tournaments `(...)` covering every edge that goes one way,
+//!
+//! with nodes and members in sorted order. A single member stands on its own
+//! and the empty graph is `[]`. The laws of the algebra all fall out of this:
+//!
 //! ```grapl
-//! {[A, B], [C, D]} =>
-//! [{A, C}, {A, D}, {B, C}, {B, D}]
+//! {{A, B}, C}              => {A, B, C}                flattening
+//! {A, []}                  => A                        identity
+//! {S, [A, B]}              => [{A, S}, {B, S}]         distributivity
+//! {A, (B, C)}              => [{A, B}, {A, C}, (B, C)]  {X, Y} = [(X, Y), (Y, X)]
+//! [A, {A, B}]              => {A, B}                   absorption
+//! [{A, B}, {B, C}, {A, C}] => {A, B, C}
+//! (A, B, A)                => {A, B}
 //! ```
-//! - Connected expressions containing anything directed are lowered to the
-//!   pair of directed expressions they abbreviate, since
-//!   `{X, Y} = [(X, Y), (Y, X)]`:
-//! ```grapl
-//! {A, (B, C)} =>
-//! [(A, B, C), (B, C, A)]
-//! ```
-//! - A node repeated in a directed expression is connected both ways to
-//!   everything between the repeats: `(A, B, A) => {A, B}`
-//! - Siblings whose nodes form a clique or a transitive tournament in the whole
-//!   graph are merged: `[{A, B}, {B, C}, {A, C}] => {A, B, C}` and
-//!   `[(A, B), (B, C), (A, C)] => (A, B, C)`
-//! - Anything that is a subgraph of a sibling is dropped: `[A, {A, B}] => {A, B}`
 //!
-//! The normal form is a disconnected list of cliques `{...}` and transitive
-//! tournaments `(...)`, none of which is a subgraph of another. It is not
-//! guaranteed to be canonical: `[(A, B, C), (B, A)]` and `[(A, B, C), (B, A, C)]`
-//! are the same graph but both are already normal. Compare [`Expr::graph`]s to
-//! compare graphs.
+//! The cover is built greedily, so it isn't always the smallest possible one.
 
 use crate::{Expr, Graph, Node, Program, Stmt};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 
 pub trait Normalize: Sized {
     fn normalize(&self) -> Self;
 }
 
-// The node sequences a normalized expression contributes as a member of a
-// connected or directed expression. A disconnected member contributes one
-// alternative per element, which is what distributes `{A, [B, C]}` into
-// `[{A, B}, {A, C}]`. An empty disconnected member contributes nothing, so it
-// is the identity: `{A, []} => A`.
-//
-// Inside a directed expression a connected member stands for both of its
-// orderings, since `{B, C} = [(B, C), (C, B)]`.
-fn alternatives(expr: &Expr, directed: bool) -> Vec<Vec<Expr>> {
-    match expr {
-        e @ Expr::Node(_) => vec![vec![e.clone()]],
-        Expr::Connected(cs) if directed && cs.len() > 1 => {
-            vec![cs.clone(), cs.iter().rev().cloned().collect()]
-        }
-        Expr::Connected(cs) | Expr::Directed(cs) => vec![cs.clone()],
-        Expr::Disconnected(ds) => ds.iter().flat_map(|d| alternatives(d, directed)).collect(),
+impl Normalize for Expr {
+    fn normalize(&self) -> Self {
+        Expr::from(&self.graph())
     }
 }
 
-// Rewrites a directed sequence with a repeated node. Everything between the
-// first and last occurrence is connected to it in both directions:
-// (X, A, Y, A, Z) => (X, {A, Y}, Z)
-//
-// Adjacent repeats are the special case (A, A) => {A, []} => A. The result is
-// shorter once normalized, so repeating this terminates.
-fn unrepeat(seq: &[Expr]) -> Option<Expr> {
-    let (i, j) = seq.iter().enumerate().find_map(|(i, node)| {
-        let j = seq.iter().rposition(|other| other == node)?;
-        (j > i).then_some((i, j))
-    })?;
-    let mut fresh = seq[..i].to_vec();
-    fresh.push(Expr::Connected(vec![
-        seq[i].clone(),
-        Expr::Directed(seq[i + 1..j].to_vec()),
-    ]));
-    fresh.extend_from_slice(&seq[j + 1..]);
-    Some(Expr::Directed(fresh))
+impl From<&Graph> for Expr {
+    fn from(graph: &Graph) -> Expr {
+        Cover::new(graph).into_expr()
+    }
 }
 
-// The nodes of a normalized connected or directed expression, in order.
+// Builds a compact expression for a graph by covering its edges.
+struct Cover<'g> {
+    graph: &'g Graph,
+    edges: HashSet<(&'g Node, &'g Node)>,
+    uncovered: BTreeSet<(&'g Node, &'g Node)>,
+}
+
+impl<'g> Cover<'g> {
+    fn new(graph: &'g Graph) -> Self {
+        let edges: HashSet<_> = graph.edges().iter().map(|(a, b)| (a, b)).collect();
+        let uncovered = edges.iter().copied().collect();
+        Cover {
+            graph,
+            edges,
+            uncovered,
+        }
+    }
+
+    fn has(&self, a: &Node, b: &Node) -> bool {
+        self.edges.contains(&(a, b))
+    }
+
+    fn into_expr(mut self) -> Expr {
+        let mut members = vec![];
+
+        // Nodes without any edges.
+        let connected: HashSet<&Node> = self.edges.iter().flat_map(|(a, b)| [*a, *b]).collect();
+        for node in self.graph.nodes() {
+            if !connected.contains(node) {
+                members.push(Expr::Node(node.clone()));
+            }
+        }
+
+        // Edges that go both ways are covered by cliques...
+        while let Some((a, b)) = self.next_uncovered(|this, a, b| this.has(b, a)) {
+            members.push(self.clique(a, b));
+        }
+        // ...and the edges that go one way by transitive tournaments.
+        while let Some((a, b)) = self.next_uncovered(|_, _, _| true) {
+            members.push(self.chain(a, b));
+        }
+
+        members.sort_by_cached_key(node_seq);
+        match members.len() {
+            0 => Expr::Disconnected(vec![]),
+            1 => members.remove(0),
+            _ => Expr::Disconnected(members),
+        }
+    }
+
+    // The first uncovered edge matching the predicate. Edges are visited in
+    // sorted order, which is what makes the cover canonical.
+    fn next_uncovered(
+        &self,
+        pred: impl Fn(&Self, &Node, &Node) -> bool,
+    ) -> Option<(&'g Node, &'g Node)> {
+        self.uncovered
+            .iter()
+            .find(|(a, b)| pred(self, a, b))
+            .copied()
+    }
+
+    // The maximal clique around the edge between a and b: grown with every
+    // node adjacent both ways to all of it.
+    fn clique(&mut self, a: &'g Node, b: &'g Node) -> Expr {
+        let mut clique = vec![a, b];
+        for c in self.graph.nodes() {
+            if !clique.contains(&c) && clique.iter().all(|x| self.has(c, x) && self.has(x, c)) {
+                clique.push(c);
+            }
+        }
+        clique.sort();
+
+        for x in &clique {
+            for y in &clique {
+                self.uncovered.remove(&(x, y));
+            }
+        }
+        Expr::Connected(clique.into_iter().map(|n| Expr::Node(n.clone())).collect())
+    }
+
+    // The transitive tournament around the edge from a to b: grown with every
+    // node that has an edge with all of it, inserted after the nodes pointing
+    // to it, as long as it still has an uncovered edge.
+    fn chain(&mut self, a: &'g Node, b: &'g Node) -> Expr {
+        let mut chain = vec![a, b];
+        for c in self.graph.nodes() {
+            if chain.contains(&c) {
+                continue;
+            }
+            let position = chain.iter().take_while(|x| self.has(x, c)).count();
+            let (before, after) = chain.split_at(position);
+            let fits = after.iter().all(|x| self.has(c, x));
+            let useful = before.iter().any(|x| self.uncovered.contains(&(x, c)))
+                || after.iter().any(|x| self.uncovered.contains(&(c, x)));
+            if fits && useful {
+                chain.insert(position, c);
+            }
+        }
+
+        for (i, x) in chain.iter().enumerate() {
+            for y in &chain[i + 1..] {
+                self.uncovered.remove(&(x, y));
+            }
+        }
+        Expr::Directed(chain.into_iter().map(|n| Expr::Node(n.clone())).collect())
+    }
+}
+
+// The nodes of a flat expression, in order. Used to sort the members of the
+// normal form.
 fn node_seq(expr: &Expr) -> Vec<Node> {
     match expr {
         Expr::Node(node) => vec![node.clone()],
-        _ => expr.members().iter().flat_map(node_seq).collect(),
-    }
-}
-
-// The out-neighbours of every node, for quick edge lookups.
-type Adjacency<'g> = HashMap<&'g Node, HashSet<&'g Node>>;
-
-fn adjacency(graph: &Graph) -> Adjacency<'_> {
-    let mut adj = Adjacency::new();
-    for (a, b) in graph.edges() {
-        adj.entry(a).or_default().insert(b);
-    }
-    adj
-}
-
-// A member of a disconnected expression being merged, with its graph and node
-// sequence computed once up front.
-struct Member {
-    expr: Expr,
-    graph: Graph,
-    nodes: Vec<Node>,
-}
-
-impl Member {
-    fn new(expr: Expr) -> Self {
-        let graph = expr.graph();
-        let nodes = node_seq(&expr);
-        Member { expr, graph, nodes }
-    }
-}
-
-// The clique or transitive tournament on the nodes of both members, if the
-// whole graph has every edge that needs. A result that is just one of the two
-// members is left to `dedup`, which keeps the survivor in place.
-fn merged(adj: &Adjacency, a: &Member, b: &Member) -> Option<Member> {
-    let edge = |x: &Node, y: &Node| adj.get(x).is_some_and(|out| out.contains(y));
-
-    // Most pairs can't merge. Check one pair of nodes they don't share before
-    // doing anything that allocates.
-    let x = a.nodes.iter().find(|x| !b.nodes.contains(x));
-    let y = b.nodes.iter().find(|y| !a.nodes.contains(y));
-    if let (Some(x), Some(y)) = (x, y) {
-        if !edge(x, y) && !edge(y, x) {
-            return None;
-        }
-    }
-
-    let mut nodes = a.nodes.clone();
-    for node in &b.nodes {
-        if !nodes.contains(node) {
-            nodes.push(node.clone());
-        }
-    }
-    let n = nodes.len();
-
-    let count = nodes
-        .iter()
-        .map(|x| nodes.iter().filter(|y| *x != **y && edge(x, y)).count())
-        .sum::<usize>();
-
-    let result = if count == n * (n - 1) {
-        // {A, B, C}: every pair both ways. Neither member's order is
-        // meaningful for the merged clique, so sort it.
-        nodes.sort();
-        Expr::Connected(nodes.into_iter().map(Expr::Node).collect())
-    } else if count == n * (n - 1) / 2 {
-        // (A, B, C): every pair one way, all agreeing with the order by
-        // out-degree.
-        let mut by_degree: Vec<(usize, Node)> = nodes
+        _ => expr
+            .members()
             .iter()
-            .map(|x| (nodes.iter().filter(|y| edge(x, y)).count(), x.clone()))
-            .collect();
-        by_degree.sort_by_key(|(degree, _)| std::cmp::Reverse(*degree));
-        let nodes: Vec<Node> = by_degree.into_iter().map(|(_, x)| x).collect();
-        let ordered = nodes
-            .iter()
-            .enumerate()
-            .all(|(i, x)| nodes[i + 1..].iter().all(|y| edge(x, y)));
-        if !ordered {
-            return None;
-        }
-        Expr::Directed(nodes.into_iter().map(Expr::Node).collect())
-    } else {
-        return None;
-    };
-
-    let result = Member::new(result);
-    if result.graph == a.graph || result.graph == b.graph {
-        return None;
-    }
-    Some(result)
-}
-
-impl Expr {
-    fn flatten(&self) -> Self {
-        match self {
-            Expr::Node(node) => Expr::Node(node.clone()),
-            Expr::Connected(exprs) => {
-                let exprs: Vec<Expr> = exprs.iter().map(Expr::normalize).collect();
-                if exprs.iter().any(Expr::is_directed) {
-                    // {X, Y} = [(X, Y), (Y, X)]
-                    let rev = exprs.iter().rev().cloned().collect();
-                    Expr::Disconnected(vec![Expr::Directed(exprs), Expr::Directed(rev)]).flatten()
-                } else {
-                    Self::distribute(exprs, false)
-                }
-            }
-            Expr::Directed(exprs) => {
-                Self::distribute(exprs.iter().map(Expr::normalize).collect(), true)
-            }
-            Expr::Disconnected(exprs) => {
-                // [A, [B, C], {D, E}] => [A, B, C, {D, E}]
-                let mut ds: Vec<Expr> = exprs
-                    .iter()
-                    .map(Expr::normalize)
-                    .flat_map(|e| match e {
-                        Expr::Disconnected(dexprs) => dexprs,
-                        e => vec![e],
-                    })
-                    .collect();
-
-                if ds.len() == 1 {
-                    // [A] => A
-                    ds.remove(0)
-                } else {
-                    Expr::Disconnected(ds)
-                }
-            }
-        }
-    }
-
-    // Distributes a connected or directed expression over its disconnected
-    // members. The general reduction strategy follows these steps:
-    // {A, [B, C], D, [E, F]} =>
-    // [{A}, [B, C], D, [E, F]] =>
-    // [{A, B}, {A, C}, D, [E, F]] =>
-    // [{A, B, D}, {A, C, D}, [E, F]] =>
-    // [{A, B, D, E}, {A, B, D, F}, {A, C, D, E}, {A, C, D, F}]
-    //
-    // Expects normalized members.
-    fn distribute(exprs: Vec<Expr>, directed: bool) -> Expr {
-        let variant = if directed {
-            Expr::Directed
-        } else {
-            Expr::Connected
-        };
-
-        let mut seqs: Vec<Vec<Expr>> = vec![vec![]];
-        for expr in &exprs {
-            let alts = alternatives(expr, directed);
-            if alts.is_empty() {
-                continue;
-            }
-            seqs = seqs
-                .iter()
-                .flat_map(|seq| {
-                    alts.iter().map(move |alt| {
-                        let mut fresh = seq.clone();
-                        fresh.extend(alt.iter().cloned());
-                        fresh
-                    })
-                })
-                .collect();
-        }
-
-        let mut members: Vec<Expr> = vec![];
-        for mut seq in seqs {
-            if directed {
-                // (A, B, A) => {A, B}
-                if let Some(rewritten) = unrepeat(&seq) {
-                    match rewritten.normalize() {
-                        Expr::Disconnected(ds) => members.extend(ds),
-                        e => members.push(e),
-                    }
-                    continue;
-                }
-            } else {
-                // A node repeated in a clique adds nothing: {A, A, B} => {A, B}
-                let mut seen = HashSet::new();
-                seq.retain(|node| seen.insert(node.clone()));
-            }
-            members.push(match seq.len() {
-                0 => Expr::Disconnected(vec![]),
-                // {A} => A
-                1 => seq.remove(0),
-                _ => variant(seq),
-            });
-        }
-
-        if members.len() == 1 {
-            members.remove(0)
-        } else {
-            Expr::Disconnected(members)
-        }
-    }
-
-    // Drops members that are subgraphs of other members. This only works on
-    // normalized expressions.
-    fn dedup(&self) -> Self {
-        match self {
-            e @ Expr::Node(_) => e.clone(),
-            // Members of a directed expression are ordered nodes, and a repeat
-            // like (A, B, A) carries the edge B->A, so there's nothing to drop.
-            e @ Expr::Directed(_) => e.clone(),
-            Expr::Connected(exprs) => Expr::Connected(Self::dedup_exprs(exprs)),
-            Expr::Disconnected(exprs) => Expr::Disconnected(Self::dedup_exprs(exprs)),
-        }
-    }
-
-    fn dedup_exprs(exprs: &[Expr]) -> Vec<Expr> {
-        let mut fresh: Vec<(Expr, Graph)> = Vec::new();
-        for expr in exprs {
-            let graph = expr.graph();
-            // Skip anything already covered by an existing expr.
-            if fresh.iter().any(|(_, f)| graph.is_subgraph(f)) {
-                continue;
-            }
-            // Replace every existing expr this one covers.
-            fresh.retain(|(_, f)| !f.is_subgraph(&graph));
-            fresh.push((expr.clone(), graph));
-        }
-        fresh.into_iter().map(|(e, _)| e).collect()
-    }
-
-    // Merges siblings whose nodes together form a clique or a transitive
-    // tournament in the whole graph. A directed expression and its reverse is
-    // the simplest case: [(A, B), (B, A)] => {A, B}
-    //
-    // This must run before `dedup`, since two different orderings of the same
-    // clique only become duplicates once they've been merged.
-    fn merge(&self) -> Self {
-        let Expr::Disconnected(exprs) = self else {
-            return self.clone();
-        };
-        let graph = self.graph();
-        let adj = adjacency(&graph);
-        let mut members: Vec<Member> = exprs.iter().cloned().map(Member::new).collect();
-        'merging: loop {
-            for i in 0..members.len() {
-                for j in i + 1..members.len() {
-                    if let Some(merged) = merged(&adj, &members[i], &members[j]) {
-                        members[i] = merged;
-                        members.remove(j);
-                        continue 'merging;
-                    }
-                }
-            }
-            break;
-        }
-        Expr::Disconnected(members.into_iter().map(|m| m.expr).collect())
-    }
-}
-
-impl Normalize for Expr {
-    fn normalize(&self) -> Self {
-        self.flatten().merge().dedup().flatten()
+            .filter_map(|e| match e {
+                Expr::Node(node) => Some(node.clone()),
+                _ => None,
+            })
+            .collect(),
     }
 }
 
@@ -352,9 +178,10 @@ impl Normalize for Stmt {
 
 impl Normalize for Program {
     fn normalize(&self) -> Self {
-        let norm_stmts = self.stmts.iter().map(Normalize::normalize).collect();
-        let norm_expr = self.expr.normalize();
-        Program::new(norm_stmts, norm_expr)
+        Program::new(
+            self.stmts.iter().map(Normalize::normalize).collect(),
+            self.expr.normalize(),
+        )
     }
 }
 
@@ -365,386 +192,124 @@ mod tests {
     use chumsky::Parser;
     use pretty_assertions::assert_eq;
 
+    // Asserts that every expression on the left normalizes to the one on the
+    // right.
+    macro_rules! assert_normalizes {
+        ($($src:literal),+ => $norm:literal) => {
+            $(assert_eq!(
+                Expr::parse($src).unwrap().normalize(),
+                Expr::parse($norm).unwrap(),
+                "normalizing {}", $src,
+            );)+
+        };
+    }
+
     #[test]
     fn normalize_node() {
-        assert_eq!(
-            Expr::parse("A").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("A").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
+        assert_normalizes!("A", "{A}", "{{A}}", "[A]", "[[A]]", "{[A]}", "(A)", "((A))" => "A");
     }
 
     #[test]
-    fn normalize_empty_expr() {
-        assert_eq!(
-            Expr::parse("[]").unwrap().normalize(),
-            Expr::parse("[]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{}").unwrap().normalize(),
-            Expr::parse("[]").unwrap(),
-        );
+    fn normalize_empty() {
+        assert_normalizes!("[]", "{}", "()", "[[], {}]", "{[], ()}" => "[]");
     }
 
     #[test]
-    fn dedup_expr() {
-        assert_eq!(Expr::parse("A").unwrap().dedup(), Expr::parse("A").unwrap(),);
-        assert_eq!(
-            Expr::parse("[]").unwrap().dedup(),
-            Expr::parse("[]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{}").unwrap().dedup(),
-            Expr::parse("{}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{A,A}").unwrap().dedup(),
-            Expr::parse("{A}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{A,A,B}").unwrap().dedup(),
-            Expr::parse("{A,B}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{{A},{A}}").unwrap().dedup(),
-            Expr::parse("{{A}}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{{A,B},{A,B}}").unwrap().dedup(),
-            Expr::parse("{{A,B}}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{{A,B},{A,B,C}}").unwrap().dedup(),
-            Expr::parse("{{A,B,C}}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{{A,B},{A,B,C},A,{C,D},{C,D,E}}")
-                .unwrap()
-                .dedup(),
-            Expr::parse("{{A,B,C},{C,D,E}}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[A,{A,B}]").unwrap().dedup(),
-            Expr::parse("[{A,B}]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[{A,B},{A,B,C},A,{C,D},{C,D,E}]")
-                .unwrap()
-                .dedup(),
-            Expr::parse("[{A,B,C},{C,D,E}]").unwrap(),
-        );
+    fn normalize_identity() {
+        assert_normalizes!("{A, []}", "[A, []]", "(A, [])", "{[], A, ()}" => "A");
+        assert_normalizes!("(A, [], B)" => "(A, B)");
+        assert_normalizes!("{[], {A, B}}" => "{A, B}");
     }
 
     #[test]
-    fn normalize_nested_expr() {
-        assert_eq!(
-            Expr::parse("{A}").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{{A}}").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[A]").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[[A]]").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{[A]}").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parser()
-                .parse("[A, [{B, C}], D]")
-                .unwrap()
-                .normalize(),
-            Expr::parse("[A, {B, C}, D]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[A, [B, C], D]").unwrap().normalize(),
-            Expr::parse("[A, B, C, D]").unwrap(),
-        );
+    fn normalize_flatten() {
+        assert_normalizes!("{{A, B}, C}", "{A, {B, C}}", "{A, B, C}" => "{A, B, C}");
+        assert_normalizes!("[[A, B], C]", "[A, [B, C]]", "[A, B, C]" => "[A, B, C]");
+        assert_normalizes!("((A, B), C)", "(A, (B, C))", "(A, B, C)" => "(A, B, C)");
+        assert_normalizes!("[A, [{B, C}], D]" => "[A, {B, C}, D]");
     }
 
     #[test]
-    fn normalize_expr() {
-        assert_eq!(
-            Expr::parse("{A, [B]}").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[A, {B}]").unwrap().normalize(),
-            Expr::parse("[A, B]").unwrap(),
-        );
-
-        assert_eq!(
-            Expr::parse("{A, [B, C]}").unwrap().normalize(),
-            Expr::parse("[{A, B}, {A, C}]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parser()
-                .parse("{{A, B}, [C, D]}")
-                .unwrap()
-                .normalize(),
-            Expr::parse("[{A, B, C}, {A, B, D}]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parser()
-                .parse("{[A, B], [C, D]}")
-                .unwrap()
-                .normalize(),
-            Expr::parser()
-                .parse("[{A, C}, {A, D}, {B, C}, {B, D}]")
-                .unwrap(),
-        );
-        assert_eq!(
-            Expr::parser()
-                .parse("{A, {B, [C, D]}}")
-                .unwrap()
-                .normalize(),
-            Expr::parse("[{A, B, C}, {A, B, D}]").unwrap(),
-        );
-
-        assert_eq!(
-            Expr::parse("{A, [B, C], D}").unwrap().normalize(),
-            Expr::parse("[{A, B, D}, {A, C, D}]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[A, {B, C}, D]").unwrap().normalize(),
-            Expr::parse("[A, {B, C}, D]").unwrap(),
-        );
-
-        assert_eq!(
-            Expr::parser()
-                .parse("{A, [{B, C}, D], E}")
-                .unwrap()
-                .normalize(),
-            Expr::parse("[{A, B, C, E}, {A, D, E}]").unwrap(),
-        );
-
-        assert_eq!(
-            Expr::parser()
-                .parse("{A, [{B, C}, D], E, [F, G]}")
-                .unwrap()
-                .normalize(),
-            Expr::parser()
-                .parse(
-                    "[
-                    {A, B, C, E, F},
-                    {A, B, C, E, G},
-                    {A, D, E, F},
-                    {A, D, E, G},
-                    ]"
-                )
-                .unwrap(),
-        );
-
-        assert_eq!(
-            Expr::parse("[A,{A,B},[A]]").unwrap().normalize(),
-            Expr::parse("{A,B}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{{A,B},{A,B,C},A,{C,D},{C,D,E}}")
-                .unwrap()
-                .normalize(),
-            Expr::parse("{A,B,C,D,E}").unwrap(),
-        );
+    fn normalize_canonical() {
+        // Nodes and members come out sorted, whatever order they went in.
+        assert_normalizes!("{B, A}", "{A, B}" => "{A, B}");
+        assert_normalizes!("[B, A]", "[A, B]" => "[A, B]");
+        assert_normalizes!("[{C, D}, {B, A}]", "[{A, B}, {C, D}]" => "[{A, B}, {C, D}]");
+        assert_normalizes!("[(B, A), C]", "[C, (B, A)]" => "[(B, A), C]");
+        assert_normalizes!("{S, [A, B]}" => "[{A, S}, {B, S}]");
     }
 
     #[test]
-    fn disconnected_dups() {
-        assert_eq!(
-            Expr::parse("[N,[I,{N,[J]}]]").unwrap().normalize(),
-            Expr::parse("[I,{N,J}]").unwrap(),
+    fn normalize_distribute() {
+        assert_normalizes!("{A, [B, C]}" => "[{A, B}, {A, C}]");
+        assert_normalizes!("{{A, B}, [C, D]}", "{A, {B, [C, D]}}" => "[{A, B, C}, {A, B, D}]");
+        assert_normalizes!("{[A, B], [C, D]}" => "[{A, C}, {A, D}, {B, C}, {B, D}]");
+        assert_normalizes!("{A, [B, C], D}" => "[{A, B, D}, {A, C, D}]");
+        assert_normalizes!("{A, [{B, C}, D], E}" => "[{A, B, C, E}, {A, D, E}]");
+        assert_normalizes!(
+            "{A, [{B, C}, D], E, [F, G]}" =>
+            "[{A, B, C, E, F}, {A, B, C, E, G}, {A, D, E, F}, {A, D, E, G}]"
         );
-        assert_eq!(
-            Expr::parse("[N,I,{N,J}]").unwrap().dedup(),
-            Expr::parse("[I,{N,J}]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[A,B,{A,B}]").unwrap().dedup(),
-            Expr::parse("[{A,B}]").unwrap(),
-        );
+        assert_normalizes!("(A, [B, C], D)" => "[(A, B, D), (A, C, D)]");
     }
 
     #[test]
-    fn normalize_empty_identity() {
-        assert_eq!(
-            Expr::parse("()").unwrap().normalize(),
-            Expr::parse("[]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{A, []}").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("(A, [], B)").unwrap().normalize(),
-            Expr::parse("(A, B)").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{[], {A, B}}").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
+    fn normalize_absorb() {
+        assert_normalizes!("{A, A}", "(A, A)", "[A, A]" => "A");
+        assert_normalizes!("{A, A, B}", "[A, {A, B}]", "[A, B, {A, B}]", "[A, {A, B}, [A]]" => "{A, B}");
+        assert_normalizes!("{{A, B}, {A, B}}", "[{A, B}, {A, B}]" => "{A, B}");
+        assert_normalizes!("{{A, B}, {A, B, C}, A, {C, D}, {C, D, E}}" => "{A, B, C, D, E}");
+        assert_normalizes!("[{A, B}, {A, B, C}, A, {C, D}, {C, D, E}]" => "[{A, B, C}, {C, D, E}]");
+        assert_normalizes!("[(A, B), (A, B, C)]", "[(A, C), (A, B, C)]" => "(A, B, C)");
+        // The reverse isn't a subgraph.
+        assert_normalizes!("[(B, A), (A, B, C)]" => "[{A, B}, (A, B, C)]");
     }
 
     #[test]
-    fn normalize_directed_expr() {
-        assert_eq!(
-            Expr::parse("(A)").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("(A, A, B)").unwrap().normalize(),
-            Expr::parse("(A, B)").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("((A, B), C)").unwrap().normalize(),
-            Expr::parse("(A, B, C)").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("(A, [B, C], D)").unwrap().normalize(),
-            Expr::parse("[(A, B, D), (A, C, D)]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("(A, {B, C}, D)").unwrap().normalize(),
-            Expr::parse("[(A, B, C, D), (A, C, B, D)]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("A -> B -> C").unwrap().normalize(),
-            Expr::parse("[(A, B), (B, C)]").unwrap(),
-        );
-    }
-
-    #[test]
-    fn normalize_mixed_expr() {
-        // {X, Y} = [(X, Y), (Y, X)]
-        assert_eq!(
-            Expr::parse("{A, (B, C)}").unwrap().normalize(),
-            Expr::parse("[(A, B, C), (B, C, A)]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{[A, B], (C, D)}").unwrap().normalize(),
-            Expr::parse("[(A, C, D), (B, C, D), (C, D, A), (C, D, B)]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{A, B, (C, D)}").unwrap().normalize(),
-            Expr::parse("[(A, B, C, D), (C, D, B, A)]").unwrap(),
-        );
-        // ... and back again.
-        assert_eq!(
-            Expr::parse("[(A, B), (B, A)]").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[(A, B), {A, B}]").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
-    }
-
-    #[test]
-    fn normalize_idempotent() {
-        // Lowering {Q, [{N, Y}, ...]} produces both orderings of {Q, N, Y},
-        // which merge into the same clique and must then be deduplicated.
-        let expr = Expr::parse("{Q, {N, [Y, (J, N)]}}").unwrap();
-        assert_eq!(
-            expr.normalize(),
-            Expr::parse("[{Q, N, Y}, {Q, J, N}]").unwrap(),
-        );
-        assert_eq!(expr.normalize().normalize(), expr.normalize());
-    }
-
-    #[test]
-    fn directed_dups() {
-        // A subsequence is a subgraph.
-        assert_eq!(
-            Expr::parse("[(A, B), (A, B, C)]").unwrap().normalize(),
-            Expr::parse("(A, B, C)").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[(A, C), (A, B, C)]").unwrap().normalize(),
-            Expr::parse("(A, B, C)").unwrap(),
-        );
-        // The reverse isn't.
-        assert_eq!(
-            Expr::parse("[(B, A), (A, B, C)]").unwrap().normalize(),
-            Expr::parse("[(B, A), (A, B, C)]").unwrap(),
-        );
-    }
-
-    #[test]
-    fn normalize_repeats() {
-        // A repeat carries the edge back.
-        assert_eq!(
-            Expr::parse("(A, B, A)").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("{(A, B), (B, A)}").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
-        // (A, B, C, A) => {A, (B, C)}
-        assert_eq!(
-            Expr::parse("(A, B, C, A)").unwrap().normalize(),
-            Expr::parse("[(A, B, C), (B, C, A)]").unwrap(),
-        );
-        // (A, B, A, C) => ({A, B}, C)
-        assert_eq!(
-            Expr::parse("(A, B, A, C)").unwrap().normalize(),
-            Expr::parse("[(A, B, C), (B, A, C)]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("(A, A)").unwrap().normalize(),
-            Expr::parse("A").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("(A, B, B, A)").unwrap().normalize(),
-            Expr::parse("{A, B}").unwrap(),
-        );
+    fn normalize_disconnected_dups() {
+        assert_normalizes!("[N, [I, {N, [J]}]]", "[N, I, {N, J}]" => "[I, {J, N}]");
     }
 
     #[test]
     fn normalize_merge() {
-        assert_eq!(
-            Expr::parse("[{A, B}, {B, C}, {A, C}]").unwrap().normalize(),
-            Expr::parse("{A, B, C}").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[(A, B), (B, C), (A, C)]").unwrap().normalize(),
-            Expr::parse("(A, B, C)").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[(A, B, C), (B, A), (C, A), (C, B)]")
-                .unwrap()
-                .normalize(),
-            Expr::parse("{A, B, C}").unwrap(),
-        );
+        assert_normalizes!("[{A, B}, {B, C}, {A, C}]" => "{A, B, C}");
+        assert_normalizes!("[(A, B), (B, C), (A, C)]" => "(A, B, C)");
+        assert_normalizes!("[(A, B, C), (B, A), (C, A), (C, B)]" => "{A, B, C}");
         // Two triangles sharing an edge are two cliques.
-        assert_eq!(
-            Expr::parse("[{A, B}, {B, C}, {C, D}, {A, C}, {B, D}]")
-                .unwrap()
-                .normalize(),
-            Expr::parse("[{A, B, C}, {B, C, D}]").unwrap(),
-        );
+        assert_normalizes!("[{A, B}, {B, C}, {C, D}, {A, C}, {B, D}]" => "[{A, B, C}, {B, C, D}]");
         // Paths and cycles stay as they are.
+        assert_normalizes!("[(A, B), (B, C)]", "A -> B -> C" => "[(A, B), (B, C)]");
+        assert_normalizes!("[{A, B}, {B, C}]" => "[{A, B}, {B, C}]");
+        assert_normalizes!("[(A, B), (B, C), (C, A)]" => "[(A, B), (B, C), (C, A)]");
+    }
+
+    #[test]
+    fn normalize_mixed() {
+        // {X, Y} = [(X, Y), (Y, X)]
+        assert_normalizes!("[(A, B), (B, A)]", "{(A, B), (B, A)}", "[(A, B), {A, B}]" => "{A, B}");
+        assert_normalizes!("{A, (B, C)}" => "[{A, B}, {A, C}, (B, C)]");
+        assert_normalizes!("(A, {B, C}, D)" => "[(A, B, C, D), {B, C}]");
+        assert_normalizes!("{A, B, (C, D)}" => "[{A, B, C}, {A, B, D}, (C, D)]");
+        assert_normalizes!("{[A, B], (C, D)}" => "[{A, C}, {A, D}, {B, C}, {B, D}, (C, D)]");
+    }
+
+    #[test]
+    fn normalize_repeats() {
+        // A repeat carries the edge back: (X, A, Y, A, Z) = (X, {A, Y}, Z)
+        assert_normalizes!("(A, B, A)", "(A, B, B, A)" => "{A, B}");
+        assert_normalizes!("(A, A, B)" => "(A, B)");
+        assert_normalizes!("(A, B, C, A)" => "[{A, B}, {A, C}, (B, C)]");
+        assert_normalizes!("(A, B, A, C)" => "[{A, B}, (A, B, C)]");
+    }
+
+    #[test]
+    fn normalize_idempotent() {
+        let expr = Expr::parse("{Q, {N, [Y, (J, N)]}}").unwrap();
         assert_eq!(
-            Expr::parse("[(A, B), (B, C)]").unwrap().normalize(),
-            Expr::parse("[(A, B), (B, C)]").unwrap(),
+            expr.normalize(),
+            Expr::parse("[{J, N, Q}, {N, Q, Y}]").unwrap(),
         );
-        assert_eq!(
-            Expr::parse("[{A, B}, {B, C}]").unwrap().normalize(),
-            Expr::parse("[{A, B}, {B, C}]").unwrap(),
-        );
-        assert_eq!(
-            Expr::parse("[(A, B), (B, C), (C, A)]").unwrap().normalize(),
-            Expr::parse("[(A, B), (B, C), (C, A)]").unwrap(),
-        );
+        assert_eq!(expr.normalize().normalize(), expr.normalize());
     }
 
     #[test]
@@ -773,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_ret() {
+    fn normalize_program() {
         assert_eq!(
             Program::parser()
                 .parse(

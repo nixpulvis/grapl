@@ -30,9 +30,12 @@ graph as `{N, J}`.
 ```
 {S, [A, B, C, D]}
 => normalize
-[{S, A}, {S, B}, {S, C}, {S, D}]
+[{A, S}, {B, S}, {C, S}, {D, S}]
 ```
 ![](img/star-graph.png)
+
+Normal forms are canonical: two expressions normalize to the same text exactly
+when they describe the same graph.
 
 ### Directed Graph
 
@@ -48,11 +51,11 @@ a special case of the directed one, and the two mix freely:
 ```
 (A, {B, C})
 => normalize
-[(A, B, C), (A, C, B)]
+[(A, B, C), {B, C}]
 
 {S, (A, B)}
 => normalize
-[(S, A, B), (A, B, S)]
+[(A, B), {A, S}, {B, S}]
 ```
 
 Reversing every `(...)` reverses every edge.
@@ -75,7 +78,7 @@ G1 = [A, B]
 G2 = {X, G1}
 => resolve => normalize
 G1 = [A, B]
-G2 = [{X, A}, {X, B}]
+G2 = [{A, X}, {B, X}]
 ```
 
 

@@ -16,8 +16,8 @@
 //! - [`graph`] gives the meaning of an expression as a [`Graph`] of nodes and
 //!   edges. Two expressions are the same graph when their [`Expr::graph`]s are
 //!   equal.
-//! - [`normal`] rewrites an expression into a smaller one with the same
-//!   [`Graph`], see [`Normalize`].
+//! - [`normal`] builds the canonical compact expression for a [`Graph`], see
+//!   [`Normalize`].
 
 use std::fmt;
 
