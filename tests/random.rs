@@ -38,6 +38,33 @@ fn random_normalize_idempotent() {
 }
 
 #[test]
+fn random_factor() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_directed_expr(25, depth, 10, 10, 10);
+        let factored = expr.factor();
+        assert_eq!(expr.graph(), factored.graph(), "factoring {}", expr);
+        assert_eq!(factored.factor(), factored, "refactoring {}", expr);
+    }
+}
+
+#[test]
+fn random_factor_shorter() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_expr(25, depth, 10, 10);
+        let (normalized, factored) = (expr.normalize(), expr.factor());
+        assert!(
+            factored.to_string().len() <= normalized.to_string().len(),
+            "factoring {}\n  normal = {}\n  factor = {}",
+            expr,
+            normalized,
+            factored,
+        );
+    }
+}
+
+#[test]
 fn random_transpose() {
     for _ in 0..ITERATIONS {
         let depth = rand::rng().random_range(0..10);

@@ -18,6 +18,8 @@
 //!   equal.
 //! - [`normal`] builds the canonical compact expression for a [`Graph`], see
 //!   [`Normalize`].
+//! - [`factor`] builds the most deeply nested expression for a [`Graph`]
+//!   instead, see [`Expr::factor`].
 
 use std::fmt;
 
@@ -218,6 +220,8 @@ pub use self::graph::Graph;
 
 mod normal;
 pub use self::normal::Normalize;
+
+pub mod factor;
 
 pub mod resolve;
 pub use self::resolve::Resolve;
