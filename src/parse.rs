@@ -1,10 +1,10 @@
 //! Parsing text into syntax.
 //!
 //! Every syntax element implements [`Parse`]. Statements are separated by
-//! whitespace and a [`Ret`] is any number of statements followed by one
+//! whitespace and a [`Program`] is any number of statements followed by one
 //! expression.
 
-use crate::{Expr, Node, Ret, Stmt};
+use crate::{Expr, Node, Program, Stmt};
 use chumsky::prelude::*;
 
 /// Parsing for syntax elements.
@@ -85,11 +85,11 @@ impl<'src> Parse<'src> for Vec<Stmt> {
     }
 }
 
-impl<'src> Parse<'src> for Ret {
+impl<'src> Parse<'src> for Program {
     fn parser() -> impl Parser<'src, &'src str, Self> + Clone {
         Vec::<Stmt>::parser()
             .then(Expr::parser())
-            .map(|(s, e)| Ret(s, e))
+            .map(|(s, e)| Program::new(s, e))
     }
 }
 
@@ -237,8 +237,8 @@ mod tests {
     #[test]
     fn parse_ret() {
         assert_eq!(
-            Ret::parse("{A, [C, D]}").into_result(),
-            Ok(Ret(
+            Program::parse("{A, [C, D]}").into_result(),
+            Ok(Program::new(
                 vec![],
                 Expr::Connected(vec![
                     enode!(A),
@@ -248,8 +248,8 @@ mod tests {
         );
 
         assert_eq!(
-            Ret::parse("G = {A, [C, D]} {G, B}").into_result(),
-            Ok(Ret(
+            Program::parse("G = {A, [C, D]} {G, B}").into_result(),
+            Ok(Program::new(
                 vec![Stmt::Assign(
                     node!(G),
                     Expr::Connected(vec![
@@ -262,7 +262,7 @@ mod tests {
         );
 
         assert_eq!(
-            Ret::parser()
+            Program::parser()
                 .parse(
                     r#"
                         G = {A, B}
@@ -271,7 +271,7 @@ mod tests {
                 "#
                 )
                 .into_result(),
-            Ok(Ret(
+            Ok(Program::new(
                 vec![Stmt::Assign(
                     node!(G),
                     Expr::Connected(vec![enode!(A), enode!(B)])

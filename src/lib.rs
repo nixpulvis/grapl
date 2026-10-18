@@ -10,7 +10,7 @@
 //!
 //! The crate is split along the stages an expression goes through:
 //!
-//! - This module defines the syntax tree: [`Node`], [`Expr`], [`Stmt`], [`Ret`].
+//! - This module defines the syntax tree: [`Node`], [`Expr`], [`Stmt`], [`Program`].
 //! - [`parse`] turns text into syntax, see [`Parse`].
 //! - [`resolve`] replaces named graphs with their definitions, see [`Resolve`].
 //! - [`graph`] gives the meaning of an expression as a [`Graph`] of nodes and
@@ -167,21 +167,30 @@ impl fmt::Display for Stmt {
     }
 }
 
-/// Returns are a sequence of statements followed by a final graph expression.
+/// A program is a sequence of statements followed by a final graph expression.
 ///
 /// ```grapl
 /// G = {A, B}
 /// {G, [C, D]}
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Ret(Vec<Stmt>, Expr);
+pub struct Program {
+    pub stmts: Vec<Stmt>,
+    pub expr: Expr,
+}
 
-impl fmt::Display for Ret {
+impl Program {
+    pub fn new(stmts: Vec<Stmt>, expr: Expr) -> Self {
+        Program { stmts, expr }
+    }
+}
+
+impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for stmt in &self.0 {
+        for stmt in &self.stmts {
             writeln!(f, "{}", stmt)?;
         }
-        write!(f, "{}", self.1)
+        write!(f, "{}", self.expr)
     }
 }
 
@@ -286,9 +295,11 @@ mod tests {
 
     #[test]
     fn display_ret() {
-        assert_eq!(Ret::parse("  G=A B").unwrap().to_string(), "G = A\nB");
+        assert_eq!(Program::parse("  G=A B").unwrap().to_string(), "G = A\nB");
         assert_eq!(
-            Ret::parse("G = A\nH = {G, B}\n[H, C]").unwrap().to_string(),
+            Program::parse("G = A\nH = {G, B}\n[H, C]")
+                .unwrap()
+                .to_string(),
             "G = A\nH = {G, B}\n[H, C]"
         );
     }

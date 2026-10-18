@@ -20,14 +20,21 @@
 //! {A, (B, C)} =>
 //! [(A, B, C), (B, C, A)]
 //! ```
+//! - A node repeated in a directed expression is connected both ways to
+//!   everything between the repeats: `(A, B, A) => {A, B}`
+//! - Siblings whose nodes form a clique or a transitive tournament in the whole
+//!   graph are merged: `[{A, B}, {B, C}, {A, C}] => {A, B, C}` and
+//!   `[(A, B), (B, C), (A, C)] => (A, B, C)`
 //! - Anything that is a subgraph of a sibling is dropped: `[A, {A, B}] => {A, B}`
 //!
 //! The normal form is a disconnected list of cliques `{...}` and transitive
 //! tournaments `(...)`, none of which is a subgraph of another. It is not
-//! canonical: `{A, B, C}` and `[{A, B}, {B, C}, {A, C}]` are the same graph but
-//! both are already normal. Compare [`Expr::graph`]s to compare graphs.
+//! guaranteed to be canonical: `[(A, B, C), (B, A)]` and `[(A, B, C), (B, A, C)]`
+//! are the same graph but both are already normal. Compare [`Expr::graph`]s to
+//! compare graphs.
 
-use crate::{Expr, Graph, Ret, Stmt};
+use crate::{Expr, Graph, Node, Program, Stmt};
+use std::collections::{HashMap, HashSet};
 
 pub trait Normalize: Sized {
     fn normalize(&self) -> Self;
@@ -50,6 +57,123 @@ fn alternatives(expr: &Expr, directed: bool) -> Vec<Vec<Expr>> {
         Expr::Connected(cs) | Expr::Directed(cs) => vec![cs.clone()],
         Expr::Disconnected(ds) => ds.iter().flat_map(|d| alternatives(d, directed)).collect(),
     }
+}
+
+// Rewrites a directed sequence with a repeated node. Everything between the
+// first and last occurrence is connected to it in both directions:
+// (X, A, Y, A, Z) => (X, {A, Y}, Z)
+//
+// Adjacent repeats are the special case (A, A) => {A, []} => A. The result is
+// shorter once normalized, so repeating this terminates.
+fn unrepeat(seq: &[Expr]) -> Option<Expr> {
+    let (i, j) = seq.iter().enumerate().find_map(|(i, node)| {
+        let j = seq.iter().rposition(|other| other == node)?;
+        (j > i).then_some((i, j))
+    })?;
+    let mut fresh = seq[..i].to_vec();
+    fresh.push(Expr::Connected(vec![
+        seq[i].clone(),
+        Expr::Directed(seq[i + 1..j].to_vec()),
+    ]));
+    fresh.extend_from_slice(&seq[j + 1..]);
+    Some(Expr::Directed(fresh))
+}
+
+// The nodes of a normalized connected or directed expression, in order.
+fn node_seq(expr: &Expr) -> Vec<Node> {
+    match expr {
+        Expr::Node(node) => vec![node.clone()],
+        _ => expr.members().iter().flat_map(node_seq).collect(),
+    }
+}
+
+// The out-neighbours of every node, for quick edge lookups.
+type Adjacency<'g> = HashMap<&'g Node, HashSet<&'g Node>>;
+
+fn adjacency(graph: &Graph) -> Adjacency<'_> {
+    let mut adj = Adjacency::new();
+    for (a, b) in graph.edges() {
+        adj.entry(a).or_default().insert(b);
+    }
+    adj
+}
+
+// A member of a disconnected expression being merged, with its graph and node
+// sequence computed once up front.
+struct Member {
+    expr: Expr,
+    graph: Graph,
+    nodes: Vec<Node>,
+}
+
+impl Member {
+    fn new(expr: Expr) -> Self {
+        let graph = expr.graph();
+        let nodes = node_seq(&expr);
+        Member { expr, graph, nodes }
+    }
+}
+
+// The clique or transitive tournament on the nodes of both members, if the
+// whole graph has every edge that needs. A result that is just one of the two
+// members is left to `dedup`, which keeps the survivor in place.
+fn merged(adj: &Adjacency, a: &Member, b: &Member) -> Option<Member> {
+    let edge = |x: &Node, y: &Node| adj.get(x).is_some_and(|out| out.contains(y));
+
+    // Most pairs can't merge. Check one pair of nodes they don't share before
+    // doing anything that allocates.
+    let x = a.nodes.iter().find(|x| !b.nodes.contains(x));
+    let y = b.nodes.iter().find(|y| !a.nodes.contains(y));
+    if let (Some(x), Some(y)) = (x, y) {
+        if !edge(x, y) && !edge(y, x) {
+            return None;
+        }
+    }
+
+    let mut nodes = a.nodes.clone();
+    for node in &b.nodes {
+        if !nodes.contains(node) {
+            nodes.push(node.clone());
+        }
+    }
+    let n = nodes.len();
+
+    let count = nodes
+        .iter()
+        .map(|x| nodes.iter().filter(|y| *x != **y && edge(x, y)).count())
+        .sum::<usize>();
+
+    let result = if count == n * (n - 1) {
+        // {A, B, C}: every pair both ways. Neither member's order is
+        // meaningful for the merged clique, so sort it.
+        nodes.sort();
+        Expr::Connected(nodes.into_iter().map(Expr::Node).collect())
+    } else if count == n * (n - 1) / 2 {
+        // (A, B, C): every pair one way, all agreeing with the order by
+        // out-degree.
+        let mut by_degree: Vec<(usize, Node)> = nodes
+            .iter()
+            .map(|x| (nodes.iter().filter(|y| edge(x, y)).count(), x.clone()))
+            .collect();
+        by_degree.sort_by_key(|(degree, _)| std::cmp::Reverse(*degree));
+        let nodes: Vec<Node> = by_degree.into_iter().map(|(_, x)| x).collect();
+        let ordered = nodes
+            .iter()
+            .enumerate()
+            .all(|(i, x)| nodes[i + 1..].iter().all(|y| edge(x, y)));
+        if !ordered {
+            return None;
+        }
+        Expr::Directed(nodes.into_iter().map(Expr::Node).collect())
+    } else {
+        return None;
+    };
+
+    let result = Member::new(result);
+    if result.graph == a.graph || result.graph == b.graph {
+        return None;
+    }
+    Some(result)
 }
 
 impl Expr {
@@ -124,27 +248,34 @@ impl Expr {
                 .collect();
         }
 
-        if directed {
-            // Adjacent repeats only add a self edge: (A, A, B) => (A, B)
-            for seq in seqs.iter_mut() {
-                seq.dedup();
+        let mut members: Vec<Expr> = vec![];
+        for mut seq in seqs {
+            if directed {
+                // (A, B, A) => {A, B}
+                if let Some(rewritten) = unrepeat(&seq) {
+                    match rewritten.normalize() {
+                        Expr::Disconnected(ds) => members.extend(ds),
+                        e => members.push(e),
+                    }
+                    continue;
+                }
+            } else {
+                // A node repeated in a clique adds nothing: {A, A, B} => {A, B}
+                let mut seen = HashSet::new();
+                seq.retain(|node| seen.insert(node.clone()));
             }
-        }
-
-        let mut seqs: Vec<Expr> = seqs
-            .into_iter()
-            .map(|mut seq| match seq.len() {
+            members.push(match seq.len() {
                 0 => Expr::Disconnected(vec![]),
                 // {A} => A
                 1 => seq.remove(0),
                 _ => variant(seq),
-            })
-            .collect();
+            });
+        }
 
-        if seqs.len() == 1 {
-            seqs.remove(0)
+        if members.len() == 1 {
+            members.remove(0)
         } else {
-            Expr::Disconnected(seqs)
+            Expr::Disconnected(members)
         }
     }
 
@@ -176,36 +307,38 @@ impl Expr {
         fresh.into_iter().map(|(e, _)| e).collect()
     }
 
-    // Folds a directed expression and its reverse back into a connected one:
-    // [(A, B), (B, A)] => [{A, B}]
+    // Merges siblings whose nodes together form a clique or a transitive
+    // tournament in the whole graph. A directed expression and its reverse is
+    // the simplest case: [(A, B), (B, A)] => {A, B}
     //
     // This must run before `dedup`, since two different orderings of the same
-    // clique only become duplicates once they've been folded.
-    fn fold(&self) -> Self {
-        match self {
-            Expr::Disconnected(exprs) => {
-                let mut fresh: Vec<Expr> = vec![];
-                for expr in exprs {
-                    let rev = expr.transpose();
-                    match fresh.iter().position(|f| *f == rev) {
-                        Some(i) if matches!(expr, Expr::Directed(_)) => {
-                            if let Expr::Directed(ds) = &fresh[i] {
-                                fresh[i] = Expr::Connected(ds.clone());
-                            }
-                        }
-                        _ => fresh.push(expr.clone()),
+    // clique only become duplicates once they've been merged.
+    fn merge(&self) -> Self {
+        let Expr::Disconnected(exprs) = self else {
+            return self.clone();
+        };
+        let graph = self.graph();
+        let adj = adjacency(&graph);
+        let mut members: Vec<Member> = exprs.iter().cloned().map(Member::new).collect();
+        'merging: loop {
+            for i in 0..members.len() {
+                for j in i + 1..members.len() {
+                    if let Some(merged) = merged(&adj, &members[i], &members[j]) {
+                        members[i] = merged;
+                        members.remove(j);
+                        continue 'merging;
                     }
                 }
-                Expr::Disconnected(fresh)
             }
-            e => e.clone(),
+            break;
         }
+        Expr::Disconnected(members.into_iter().map(|m| m.expr).collect())
     }
 }
 
 impl Normalize for Expr {
     fn normalize(&self) -> Self {
-        self.flatten().fold().dedup().flatten()
+        self.flatten().merge().dedup().flatten()
     }
 }
 
@@ -217,18 +350,18 @@ impl Normalize for Stmt {
     }
 }
 
-impl Normalize for Ret {
+impl Normalize for Program {
     fn normalize(&self) -> Self {
-        let norm_stmts = self.0.iter().map(Normalize::normalize).collect();
-        let norm_expr = self.1.normalize();
-        Ret(norm_stmts, norm_expr)
+        let norm_stmts = self.stmts.iter().map(Normalize::normalize).collect();
+        let norm_expr = self.expr.normalize();
+        Program::new(norm_stmts, norm_expr)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Normalize;
-    use crate::{Expr, Parse, Ret, Stmt};
+    use crate::{Expr, Parse, Program, Stmt};
     use chumsky::Parser;
     use pretty_assertions::assert_eq;
 
@@ -518,11 +651,11 @@ mod tests {
     #[test]
     fn normalize_idempotent() {
         // Lowering {Q, [{N, Y}, ...]} produces both orderings of {Q, N, Y},
-        // which fold into the same clique and must then be deduplicated.
+        // which merge into the same clique and must then be deduplicated.
         let expr = Expr::parse("{Q, {N, [Y, (J, N)]}}").unwrap();
         assert_eq!(
             expr.normalize(),
-            Expr::parse("[{Q, N, Y}, {Q, N, J}]").unwrap(),
+            Expr::parse("[{Q, N, Y}, {Q, J, N}]").unwrap(),
         );
         assert_eq!(expr.normalize().normalize(), expr.normalize());
     }
@@ -543,10 +676,74 @@ mod tests {
             Expr::parse("[(B, A), (A, B, C)]").unwrap().normalize(),
             Expr::parse("[(B, A), (A, B, C)]").unwrap(),
         );
-        // A repeat carries the edge back, so it can't be dropped.
+    }
+
+    #[test]
+    fn normalize_repeats() {
+        // A repeat carries the edge back.
         assert_eq!(
-            Expr::parse("(A, B, A)").unwrap().edges(),
-            Expr::parse("{A, B}").unwrap().edges(),
+            Expr::parse("(A, B, A)").unwrap().normalize(),
+            Expr::parse("{A, B}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{(A, B), (B, A)}").unwrap().normalize(),
+            Expr::parse("{A, B}").unwrap(),
+        );
+        // (A, B, C, A) => {A, (B, C)}
+        assert_eq!(
+            Expr::parse("(A, B, C, A)").unwrap().normalize(),
+            Expr::parse("[(A, B, C), (B, C, A)]").unwrap(),
+        );
+        // (A, B, A, C) => ({A, B}, C)
+        assert_eq!(
+            Expr::parse("(A, B, A, C)").unwrap().normalize(),
+            Expr::parse("[(A, B, C), (B, A, C)]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("(A, A)").unwrap().normalize(),
+            Expr::parse("A").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("(A, B, B, A)").unwrap().normalize(),
+            Expr::parse("{A, B}").unwrap(),
+        );
+    }
+
+    #[test]
+    fn normalize_merge() {
+        assert_eq!(
+            Expr::parse("[{A, B}, {B, C}, {A, C}]").unwrap().normalize(),
+            Expr::parse("{A, B, C}").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[(A, B), (B, C), (A, C)]").unwrap().normalize(),
+            Expr::parse("(A, B, C)").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[(A, B, C), (B, A), (C, A), (C, B)]")
+                .unwrap()
+                .normalize(),
+            Expr::parse("{A, B, C}").unwrap(),
+        );
+        // Two triangles sharing an edge are two cliques.
+        assert_eq!(
+            Expr::parse("[{A, B}, {B, C}, {C, D}, {A, C}, {B, D}]")
+                .unwrap()
+                .normalize(),
+            Expr::parse("[{A, B, C}, {B, C, D}]").unwrap(),
+        );
+        // Paths and cycles stay as they are.
+        assert_eq!(
+            Expr::parse("[(A, B), (B, C)]").unwrap().normalize(),
+            Expr::parse("[(A, B), (B, C)]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[{A, B}, {B, C}]").unwrap().normalize(),
+            Expr::parse("[{A, B}, {B, C}]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[(A, B), (B, C), (C, A)]").unwrap().normalize(),
+            Expr::parse("[(A, B), (B, C), (C, A)]").unwrap(),
         );
     }
 
@@ -578,7 +775,7 @@ mod tests {
     #[test]
     fn normalize_ret() {
         assert_eq!(
-            Ret::parser()
+            Program::parser()
                 .parse(
                     r#"
                     G1 = {A, [B, C]}
@@ -587,7 +784,7 @@ mod tests {
                 )
                 .unwrap()
                 .normalize(),
-            Ret::parser()
+            Program::parser()
                 .parse(
                     r#"
                     G1 = [{A, B}, {A, C}]
