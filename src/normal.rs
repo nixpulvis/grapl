@@ -136,31 +136,15 @@ impl Expr {
     fn dedup(&self) -> Self {
         macro_rules! dedup_exprs {
             ($varient:path, $exprs:expr) => {{
-                let mut fresh = Vec::new();
+                let mut fresh: Vec<Expr> = Vec::new();
                 for expr in $exprs {
-                    enum Action {
-                        Insert,
-                        Swap,
-                        Skip,
+                    // Skip anything already covered by an existing expr.
+                    if fresh.iter().any(|f| expr.is_norm_subgraph(f)) {
+                        continue;
                     }
-                    let mut action = Action::Insert;
-                    for f in fresh.iter() {
-                        if expr.is_norm_subgraph(&f) {
-                            action = Action::Skip;
-                        } else if f.is_norm_subgraph(expr) {
-                            action = Action::Swap;
-                        }
-                    }
-                    match action {
-                        Action::Insert => {
-                            fresh.push(expr.clone());
-                        }
-                        Action::Swap => {
-                            fresh.remove(fresh.len() - 1);
-                            fresh.push(expr.clone());
-                        }
-                        Action::Skip => {}
-                    }
+                    // Replace every existing expr this one covers.
+                    fresh.retain(|f| !f.is_norm_subgraph(expr));
+                    fresh.push(expr.clone());
                 }
                 $varient(fresh)
             }};
@@ -404,11 +388,15 @@ mod tests {
     fn disconnected_dups() {
         assert_eq!(
             Expr::parse("[N,[I,{N,[J]}]]").unwrap().normalize(),
-            Expr::parse("[N,I,{N,J}]").unwrap(),
+            Expr::parse("[I,{N,J}]").unwrap(),
         );
         assert_eq!(
             Expr::parse("[N,I,{N,J}]").unwrap().dedup(),
             Expr::parse("[I,{N,J}]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("[A,B,{A,B}]").unwrap().dedup(),
+            Expr::parse("[{A,B}]").unwrap(),
         );
     }
 
