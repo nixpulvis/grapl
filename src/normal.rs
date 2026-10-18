@@ -1,32 +1,34 @@
-use std::collections::HashSet;
+//! Reductions to normal form.
+//!
+//! Normalizing rewrites an expression into a smaller one describing the same
+//! [`Graph`]:
+//!
+//! - Empty graphs are fully disconnected: `{} => []`, `() => []`
+//! - Single node graphs are just the node: `[{A}] => A`
+//! - Fully connected graphs are flattened: `{{A, B}, C} => {A, B, C}`
+//! - Directed graphs are flattened the same way, keeping their order:
+//!   `((A, B), C) => (A, B, C)`
+//! - Connected and directed expressions distribute over disconnected ones:
+//! ```grapl
+//! {[A, B], [C, D]} =>
+//! [{A, C}, {A, D}, {B, C}, {B, D}]
+//! ```
+//! - Connected expressions containing anything directed are lowered to the
+//!   pair of directed expressions they abbreviate, since
+//!   `{X, Y} = [(X, Y), (Y, X)]`:
+//! ```grapl
+//! {A, (B, C)} =>
+//! [(A, B, C), (B, C, A)]
+//! ```
+//! - Anything that is a subgraph of a sibling is dropped: `[A, {A, B}] => {A, B}`
+//!
+//! The normal form is a disconnected list of cliques `{...}` and transitive
+//! tournaments `(...)`, none of which is a subgraph of another. It is not
+//! canonical: `{A, B, C}` and `[{A, B}, {B, C}, {A, C}]` are the same graph but
+//! both are already normal. Compare [`Expr::graph`]s to compare graphs.
 
-use crate::{Expr, Node, Ret, Stmt};
+use crate::{Expr, Graph, Ret, Stmt};
 
-/// Reductions to normal form.
-///
-/// - Empty graphs are fully disconnected: `{} => []`, `() => []`
-/// - Single node graphs are just the node: `[{A}] => A`
-/// - Fully connected graphs are flattened: `{{A, B}, C} => {A, B, C}`
-/// - Directed graphs are flattened the same way, keeping their order:
-///   `((A, B), C) => (A, B, C)`
-/// - Normalized graphs with disconnected expressions all collapse into a single
-///   fully disconnected expression:
-/// ```grapl
-/// {[A, B], [C, D]} =>
-/// [{A, C}, {A, D}, {B, C}, {B, D}]
-/// ```
-/// - Connected expressions containing anything directed are lowered to the
-///   pair of directed expressions they abbreviate, since
-///   `{X, Y} = [(X, Y), (Y, X)]`:
-/// ```grapl
-/// {A, (B, C)} =>
-/// [(A, B, C), (B, C, A)]
-/// ```
-///
-/// The normal form is a disconnected list of cliques `{...}` and transitive
-/// tournaments `(...)`, none of which is a subgraph of another. It is not
-/// canonical: `{A, B, C}` and `[{A, B}, {B, C}, {A, C}]` are the same graph but
-/// both are already normal. Use [`Expr::edges`] to compare graphs.
 pub trait Normalize: Sized {
     fn normalize(&self) -> Self;
 }
@@ -68,32 +70,20 @@ impl Expr {
                 Self::distribute(exprs.iter().map(Expr::normalize).collect(), true)
             }
             Expr::Disconnected(exprs) => {
-                // Collect a list of disconnected nodes.
-                let mut ds = vec![];
-                for expr in exprs {
-                    match expr.normalize() {
-                        // ds = [A,B]
-                        // expr = {C,D}
-                        // ds <= [A,B,{C,D}]
-                        e @ Expr::Node(_) | e @ Expr::Connected(_) | e @ Expr::Directed(_) => {
-                            ds.push(e)
-                        }
-                        // ds = [A,B]
-                        // expr = [C,D]
-                        // ds <= [A,B,C,D]
-                        Expr::Disconnected(dexprs) => {
-                            for dexpr in dexprs {
-                                ds.push(dexpr);
-                            }
-                        }
-                    }
-                }
+                // [A, [B, C], {D, E}] => [A, B, C, {D, E}]
+                let mut ds: Vec<Expr> = exprs
+                    .iter()
+                    .map(Expr::normalize)
+                    .flat_map(|e| match e {
+                        Expr::Disconnected(dexprs) => dexprs,
+                        e => vec![e],
+                    })
+                    .collect();
 
                 if ds.len() == 1 {
                     // [A] => A
                     ds.remove(0)
                 } else {
-                    // [A,[B,C],{D,E}] => [A,B,C,{D,E}]
                     Expr::Disconnected(ds)
                 }
             }
@@ -158,7 +148,8 @@ impl Expr {
         }
     }
 
-    // This only works on normalized expressions.
+    // Drops members that are subgraphs of other members. This only works on
+    // normalized expressions.
     fn dedup(&self) -> Self {
         match self {
             e @ Expr::Node(_) => e.clone(),
@@ -171,21 +162,25 @@ impl Expr {
     }
 
     fn dedup_exprs(exprs: &[Expr]) -> Vec<Expr> {
-        let mut fresh: Vec<Expr> = Vec::new();
+        let mut fresh: Vec<(Expr, Graph)> = Vec::new();
         for expr in exprs {
+            let graph = expr.graph();
             // Skip anything already covered by an existing expr.
-            if fresh.iter().any(|f| expr.is_norm_subgraph(f)) {
+            if fresh.iter().any(|(_, f)| graph.is_subgraph(f)) {
                 continue;
             }
             // Replace every existing expr this one covers.
-            fresh.retain(|f| !f.is_norm_subgraph(expr));
-            fresh.push(expr.clone());
+            fresh.retain(|(_, f)| !f.is_subgraph(&graph));
+            fresh.push((expr.clone(), graph));
         }
-        fresh
+        fresh.into_iter().map(|(e, _)| e).collect()
     }
 
     // Folds a directed expression and its reverse back into a connected one:
     // [(A, B), (B, A)] => [{A, B}]
+    //
+    // This must run before `dedup`, since two different orderings of the same
+    // clique only become duplicates once they've been folded.
     fn fold(&self) -> Self {
         match self {
             Expr::Disconnected(exprs) => {
@@ -206,22 +201,15 @@ impl Expr {
             e => e.clone(),
         }
     }
-
-    fn is_norm_subgraph(&self, other: &Self) -> bool {
-        let nodes: HashSet<Node> = other.nodes().into_iter().collect();
-        let edges: HashSet<(Node, Node)> = other.norm_edges().into_iter().collect();
-        self.nodes().iter().all(|node| nodes.contains(node))
-            && self.norm_edges().iter().all(|edge| edges.contains(edge))
-    }
 }
 
 impl Normalize for Expr {
     fn normalize(&self) -> Self {
-        self.flatten().dedup().fold().flatten()
+        self.flatten().fold().dedup().flatten()
     }
 }
 
-impl<'src> Normalize for Stmt {
+impl Normalize for Stmt {
     fn normalize(&self) -> Self {
         match self {
             Stmt::Assign(node, expr) => Stmt::Assign(node.clone(), expr.normalize()),
@@ -525,6 +513,18 @@ mod tests {
             Expr::parse("[(A, B), {A, B}]").unwrap().normalize(),
             Expr::parse("{A, B}").unwrap(),
         );
+    }
+
+    #[test]
+    fn normalize_idempotent() {
+        // Lowering {Q, [{N, Y}, ...]} produces both orderings of {Q, N, Y},
+        // which fold into the same clique and must then be deduplicated.
+        let expr = Expr::parse("{Q, {N, [Y, (J, N)]}}").unwrap();
+        assert_eq!(
+            expr.normalize(),
+            Expr::parse("[{Q, N, Y}, {Q, N, J}]").unwrap(),
+        );
+        assert_eq!(expr.normalize().normalize(), expr.normalize());
     }
 
     #[test]

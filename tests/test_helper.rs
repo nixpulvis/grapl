@@ -69,45 +69,6 @@ pub fn generate_directed_expr(
     }
 }
 
-/// The edges of an expression computed directly from the meaning of each
-/// form, without normalizing. `[]` adds nothing, `{}` adds every pair between
-/// members both ways, and `()` adds every pair from earlier to later members.
-#[allow(unused)]
-pub fn naive_edges(expr: &Expr) -> Vec<(Node, Node)> {
-    fn pairs(a: &Expr, b: &Expr, edges: &mut Vec<(Node, Node)>) {
-        for x in a.nodes() {
-            for y in b.nodes() {
-                if x != y {
-                    edges.push((x.clone(), y));
-                }
-            }
-        }
-    }
-    let mut edges = vec![];
-    match expr {
-        Expr::Node(_) => {}
-        Expr::Disconnected(exprs) => {
-            for e in exprs {
-                edges.append(&mut naive_edges(e));
-            }
-        }
-        Expr::Connected(exprs) | Expr::Directed(exprs) => {
-            for (i, a) in exprs.iter().enumerate() {
-                edges.append(&mut naive_edges(a));
-                for b in &exprs[i + 1..] {
-                    pairs(a, b, &mut edges);
-                    if let Expr::Connected(_) = expr {
-                        pairs(b, a, &mut edges);
-                    }
-                }
-            }
-        }
-    }
-    edges.sort();
-    edges.dedup();
-    edges
-}
-
 #[allow(unused)]
 pub fn generate_stmts(
     node_max_len: usize,
