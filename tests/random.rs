@@ -17,6 +17,31 @@ fn random_nodes_and_edges() {
         let normalized = expr.normalize();
         assert_eq!(expr.nodes(), normalized.nodes());
         assert_eq!(expr.edges(), normalized.edges());
+        assert_eq!(expr.edges(), naive_edges(&expr));
+    }
+}
+
+#[test]
+fn random_directed_nodes_and_edges() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_directed_expr(25, depth, 10, 10, 10);
+        let normalized = expr.normalize();
+        assert_eq!(expr.nodes(), normalized.nodes());
+        assert_eq!(expr.edges(), normalized.edges());
+        assert_eq!(expr.edges(), naive_edges(&expr));
+    }
+}
+
+#[test]
+fn random_transpose() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_directed_expr(25, depth, 10, 10, 10);
+        let mut reversed: Vec<_> = expr.edges().into_iter().map(|(a, b)| (b, a)).collect();
+        reversed.sort();
+        assert_eq!(expr.transpose().edges(), reversed);
+        assert_eq!(expr.transpose().transpose().normalize(), expr.normalize());
     }
 }
 

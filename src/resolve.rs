@@ -148,6 +148,7 @@ impl<'src> Resolve<'src> for Expr {
             Expr::Node(node) => Ok(env.lookup(node)),
             Expr::Connected(exprs) => inner!(exprs, Expr::Connected),
             Expr::Disconnected(exprs) => inner!(exprs, Expr::Disconnected),
+            Expr::Directed(exprs) => inner!(exprs, Expr::Directed),
         }
     }
 }

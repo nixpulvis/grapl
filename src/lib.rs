@@ -45,12 +45,32 @@ impl std::fmt::Display for Node {
 /// ```grapl
 /// { A, B }
 /// { A, [B, C] }
+/// ( A, B )
+/// A -> B -> C
 /// ```
+///
+/// Only the three bracket forms exist in the algebra. `A -> B -> C` is sugar
+/// for the path `[(A, B), (B, C)]` and is desugared by the parser.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expr {
     Node(Node),
+    /// `{A, B, C}`: an edge in both directions between every pair of members.
+    ///
+    /// This is the symmetric closure of [`Expr::Directed`], that is
+    /// `{X, Y} = [(X, Y), (Y, X)]`, and so it is commutative.
     Connected(Vec<Expr>),
+    /// `[A, B, C]`: adds no edges between its members, in either direction.
+    ///
+    /// Members with disjoint node sets become separate components; members
+    /// sharing a node are joined through it. So `[N, {N, J}]` is the same
+    /// graph as `{N, J}`.
     Disconnected(Vec<Expr>),
+    /// `(A, B, C)`: an edge from every member to every *later* member.
+    ///
+    /// Order matters, so this is not commutative. Note that `(A, B, C)` has
+    /// three edges `A->B`, `A->C`, `B->C`, it is a transitive tournament and
+    /// not a path. For a path use `A -> B -> C`.
+    Directed(Vec<Expr>),
 }
 
 impl<'src> Parse<'src> for Expr {
@@ -74,8 +94,68 @@ impl<'src> Parse<'src> for Expr {
                 .delimited_by(just('['), just(']'))
                 .map(Expr::Disconnected);
 
-            choice((node, connected, disconnected)).padded()
+            let directed = seq
+                .clone()
+                .delimited_by(just('('), just(')'))
+                .map(Expr::Directed);
+
+            let atom = choice((node, connected, disconnected, directed)).padded();
+
+            // `A -> B -> C` is sugar for the path `[(A, B), (B, C)]`.
+            atom.separated_by(just("->").padded())
+                .at_least(1)
+                .collect::<Vec<_>>()
+                .map(Expr::path)
         })
+    }
+}
+
+impl Expr {
+    /// Builds the path through the given expressions, in order.
+    ///
+    /// ```grapl
+    /// A -> B -> C => [(A, B), (B, C)]
+    /// ```
+    pub fn path(mut exprs: Vec<Expr>) -> Expr {
+        match exprs.len() {
+            0 => Expr::Disconnected(vec![]),
+            1 => exprs.remove(0),
+            2 => Expr::Directed(exprs),
+            _ => Expr::Disconnected(
+                exprs
+                    .windows(2)
+                    .map(|w| Expr::Directed(w.to_vec()))
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Reverses the direction of every edge.
+    ///
+    /// Only [`Expr::Directed`] carries direction, so this just reverses the
+    /// order of every directed expression.
+    pub fn transpose(&self) -> Expr {
+        match self {
+            Expr::Node(node) => Expr::Node(node.clone()),
+            Expr::Connected(exprs) => Expr::Connected(exprs.iter().map(Expr::transpose).collect()),
+            Expr::Disconnected(exprs) => {
+                Expr::Disconnected(exprs.iter().map(Expr::transpose).collect())
+            }
+            Expr::Directed(exprs) => {
+                Expr::Directed(exprs.iter().rev().map(Expr::transpose).collect())
+            }
+        }
+    }
+
+    /// Returns true if any part of this expression is directed.
+    pub fn is_directed(&self) -> bool {
+        match self {
+            Expr::Node(_) => false,
+            Expr::Directed(_) => true,
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
+                exprs.iter().any(Expr::is_directed)
+            }
+        }
     }
 }
 
@@ -84,7 +164,7 @@ impl<'src> Expr {
     pub fn nodes(&self) -> Vec<Node> {
         match self {
             Expr::Node(node) => vec![node.clone()],
-            Expr::Connected(exprs) | Expr::Disconnected(exprs) => exprs
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) | Expr::Directed(exprs) => exprs
                 .iter()
                 .fold(vec![], |mut v, e| {
                     v.append(&mut e.nodes());
@@ -98,26 +178,44 @@ impl<'src> Expr {
     }
 
     /// Retrurns the **sorted** list of edges for this expression.
+    ///
+    /// Edges are directed pairs. An undirected edge `{A, B}` shows up as both
+    /// `(A, B)` and `(B, A)`.
     pub fn edges(&self) -> Vec<(Node, Node)> {
-        match self.normalize() {
+        self.normalize()
+            .norm_edges()
+            .into_iter()
+            .sorted()
+            .dedup()
+            .collect()
+    }
+
+    // Edges of a normalized expression, see `Normalize`. Members of connected
+    // and directed expressions are assumed to be nodes at this point.
+    pub(crate) fn norm_edges(&self) -> Vec<(Node, Node)> {
+        match self {
             Self::Node(_) => vec![],
-            // TODO: directed vs undirected...
             expr @ Self::Connected(_) => expr
                 .nodes()
                 .iter()
                 .cartesian_product(expr.nodes().iter())
-                .map(|(a, b)| (a.clone(), b.clone()))
-                .sorted()
                 .filter(|(a, b)| a != b)
-                .dedup()
+                .map(|(a, b)| (a.clone(), b.clone()))
                 .collect(),
-            Self::Disconnected(exprs) => {
+            Self::Directed(exprs) => {
                 let mut edges = vec![];
-                for expr in exprs {
-                    edges.append(&mut expr.edges());
+                for (i, a) in exprs.iter().enumerate() {
+                    for b in &exprs[i + 1..] {
+                        for (a, b) in a.nodes().iter().cartesian_product(b.nodes().iter()) {
+                            if a != b {
+                                edges.push((a.clone(), b.clone()));
+                            }
+                        }
+                    }
                 }
-                edges.into_iter().sorted().dedup().collect()
+                edges
             }
+            Self::Disconnected(exprs) => exprs.iter().flat_map(Expr::norm_edges).collect(),
         }
     }
 
@@ -125,7 +223,7 @@ impl<'src> Expr {
     pub fn contains(&self, node: &Node) -> bool {
         match self {
             Expr::Node(n) => node == n,
-            Expr::Connected(exprs) | Expr::Disconnected(exprs) => {
+            Expr::Connected(exprs) | Expr::Disconnected(exprs) | Expr::Directed(exprs) => {
                 exprs.iter().any(|e| e.contains(node))
             }
         }
@@ -167,6 +265,7 @@ impl<'src> std::fmt::Display for Expr {
             Expr::Node(node) => write!(f, "{}", node),
             Expr::Connected(exprs) => write!(f, "{{{}}}", joined(&exprs)),
             Expr::Disconnected(exprs) => write!(f, "[{}]", joined(&exprs)),
+            Expr::Directed(exprs) => write!(f, "({})", joined(&exprs)),
         }
     }
 }
@@ -378,6 +477,108 @@ mod tests {
                 .to_string(),
             "{A, {B, [C, D]}}"
         )
+    }
+
+    #[test]
+    fn parse_directed_expr() {
+        assert_eq!(
+            Expr::parse("(A, B)").into_result(),
+            Ok(Expr::Directed(vec![enode!(A), enode!(B)]))
+        );
+        assert_eq!(
+            Expr::parse("{A, (B, [C, D])}").into_result(),
+            Ok(Expr::Connected(vec![
+                enode!(A),
+                Expr::Directed(vec![
+                    enode!(B),
+                    Expr::Disconnected(vec![enode!(C), enode!(D)])
+                ])
+            ]))
+        );
+        // Arrows are sugar for paths.
+        assert_eq!(
+            Expr::parse("A -> B").into_result(),
+            Ok(Expr::Directed(vec![enode!(A), enode!(B)]))
+        );
+        assert_eq!(
+            Expr::parse("A -> B -> C").into_result(),
+            Ok(Expr::Disconnected(vec![
+                Expr::Directed(vec![enode!(A), enode!(B)]),
+                Expr::Directed(vec![enode!(B), enode!(C)]),
+            ]))
+        );
+        assert_eq!(
+            Expr::parse("{A -> B, C}").into_result(),
+            Ok(Expr::Connected(vec![
+                Expr::Directed(vec![enode!(A), enode!(B)]),
+                enode!(C),
+            ]))
+        );
+        assert_eq!(
+            Expr::parse("{A, B} -> C").into_result(),
+            Ok(Expr::Directed(vec![
+                Expr::Connected(vec![enode!(A), enode!(B)]),
+                enode!(C),
+            ]))
+        );
+    }
+
+    #[test]
+    fn display_directed_expr() {
+        assert_eq!(
+            Expr::parse("( A,(B,  C) )").unwrap().to_string(),
+            "(A, (B, C))"
+        );
+        assert_eq!(
+            Expr::parse("A -> B -> C").unwrap().to_string(),
+            "[(A, B), (B, C)]"
+        );
+    }
+
+    #[test]
+    fn edges_directed_expr() {
+        assert_eq!(
+            Expr::parse("(A, B, C)").unwrap().edges(),
+            vec![
+                (node!(A), node!(B)),
+                (node!(A), node!(C)),
+                (node!(B), node!(C)),
+            ]
+        );
+        assert_eq!(
+            Expr::parse("A -> B -> C").unwrap().edges(),
+            vec![(node!(A), node!(B)), (node!(B), node!(C)),]
+        );
+        assert_eq!(
+            Expr::parse("{A, (B, C)}").unwrap().edges(),
+            vec![
+                (node!(A), node!(B)),
+                (node!(A), node!(C)),
+                (node!(B), node!(A)),
+                (node!(B), node!(C)),
+                (node!(C), node!(A)),
+            ]
+        );
+        assert_eq!(
+            Expr::parse("[(A, B), (B, A)]").unwrap().edges(),
+            Expr::parse("{A, B}").unwrap().edges(),
+        );
+    }
+
+    #[test]
+    fn transpose_expr() {
+        assert_eq!(
+            Expr::parse("[(A, B), {C, D}]").unwrap().transpose(),
+            Expr::parse("[(B, A), {C, D}]").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("(A, (B, C))").unwrap().transpose(),
+            Expr::parse("((C, B), A)").unwrap(),
+        );
+        assert_eq!(
+            Expr::parse("{A, [B, C]}").unwrap().transpose(),
+            Expr::parse("{A, [B, C]}").unwrap(),
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@ fn generate_delim_expr(
     depth: usize,
     cweight: usize,
     dweight: usize,
+    tweight: usize,
 ) -> Expr {
     let len = rand::rng().random_range(0..=depth * 4);
     let seq = len
@@ -32,7 +33,7 @@ fn generate_delim_expr(
             let inner = if depth == 0 {
                 Expr::Node(generate_node(node_max_len))
             } else {
-                generate_expr(node_max_len, depth - 1, cweight, dweight)
+                generate_directed_expr(node_max_len, depth - 1, cweight, dweight, tweight)
             };
             format!("{}, {}", s, inner)
         });
@@ -44,14 +45,67 @@ fn generate_delim_expr(
 
 #[allow(unused)]
 pub fn generate_expr(node_max_len: usize, depth: usize, cweight: usize, dweight: usize) -> Expr {
-    let weights = [1, cweight, dweight];
+    generate_directed_expr(node_max_len, depth, cweight, dweight, 0)
+}
+
+/// Like [`generate_expr`] but also generates directed `(...)` expressions with
+/// the given weight.
+#[allow(unused)]
+pub fn generate_directed_expr(
+    node_max_len: usize,
+    depth: usize,
+    cweight: usize,
+    dweight: usize,
+    tweight: usize,
+) -> Expr {
+    let weights = [1, cweight, dweight, tweight];
     let dist = WeightedIndex::new(&weights).unwrap();
     let choice = rand::rng().sample(dist);
     match choice {
         0 => Expr::Node(generate_node(node_max_len)),
-        1 => generate_delim_expr('{', '}', node_max_len, depth, cweight, dweight),
-        _ => generate_delim_expr('[', ']', node_max_len, depth, cweight, dweight),
+        1 => generate_delim_expr('{', '}', node_max_len, depth, cweight, dweight, tweight),
+        2 => generate_delim_expr('[', ']', node_max_len, depth, cweight, dweight, tweight),
+        _ => generate_delim_expr('(', ')', node_max_len, depth, cweight, dweight, tweight),
     }
+}
+
+/// The edges of an expression computed directly from the meaning of each
+/// form, without normalizing. `[]` adds nothing, `{}` adds every pair between
+/// members both ways, and `()` adds every pair from earlier to later members.
+#[allow(unused)]
+pub fn naive_edges(expr: &Expr) -> Vec<(Node, Node)> {
+    fn pairs(a: &Expr, b: &Expr, edges: &mut Vec<(Node, Node)>) {
+        for x in a.nodes() {
+            for y in b.nodes() {
+                if x != y {
+                    edges.push((x.clone(), y));
+                }
+            }
+        }
+    }
+    let mut edges = vec![];
+    match expr {
+        Expr::Node(_) => {}
+        Expr::Disconnected(exprs) => {
+            for e in exprs {
+                edges.append(&mut naive_edges(e));
+            }
+        }
+        Expr::Connected(exprs) | Expr::Directed(exprs) => {
+            for (i, a) in exprs.iter().enumerate() {
+                edges.append(&mut naive_edges(a));
+                for b in &exprs[i + 1..] {
+                    pairs(a, b, &mut edges);
+                    if let Expr::Connected(_) = expr {
+                        pairs(b, a, &mut edges);
+                    }
+                }
+            }
+        }
+    }
+    edges.sort();
+    edges.dedup();
+    edges
 }
 
 #[allow(unused)]
