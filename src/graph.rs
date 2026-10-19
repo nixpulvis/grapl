@@ -86,6 +86,19 @@ impl Graph {
     pub fn is_subgraph(&self, other: &Self) -> bool {
         self.nodes.is_subset(&other.nodes) && self.edges.is_subset(&other.edges)
     }
+
+    /// The subgraph on the given nodes, with every edge between them.
+    pub fn induced(&self, nodes: &BTreeSet<Node>) -> Self {
+        Graph {
+            nodes: self.nodes.intersection(nodes).cloned().collect(),
+            edges: self
+                .edges
+                .iter()
+                .filter(|(a, b)| nodes.contains(a) && nodes.contains(b))
+                .cloned()
+                .collect(),
+        }
+    }
 }
 
 impl Expr {

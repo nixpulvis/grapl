@@ -60,6 +60,37 @@ a special case of the directed one, and the two mix freely:
 
 Reversing every `(...)` reverses every edge.
 
+### Factoring
+
+Normal forms are sums of products, and can be much longer than what you wrote:
+
+```
+{[A, B], [C, D], [E, F]}
+=> normalize
+[{A, C, E}, {A, C, F}, {A, D, E}, {A, D, F}, {B, C, E}, {B, C, F}, {B, D, E}]
+```
+
+Factoring goes the other way, nesting the brackets as deeply as the graph
+allows (this is modular decomposition). Anything without a prime part comes
+back mentioning each node once:
+
+```
+[{A, C, E}, {A, C, F}, {A, D, E}, {A, D, F}, {B, C, E}, {B, C, F}, {B, D, E}]
+=> factor
+{[A, B], [C, D], [E, F]}
+
+[{A, B}, {B, C}, {C, D}, {D, A}]
+=> factor
+{[A, C], [B, D]}
+
+[{A, B}, {B, C}, {C, D}]
+=> factor
+[{A, B}, {B, C}, {C, D}]
+```
+
+The last one is a path, which has no modules, so it stays a sum of products.
+In the REPL, `!factor <expr>` shows the factored form.
+
 ### Paths
 
 ```

@@ -60,6 +60,7 @@ enum Input {
 
 enum Cmd {
     Env,
+    Factor(Expr),
     #[cfg(feature = "petgraph")]
     Viz(Expr, Option<PathBuf>),
 }
@@ -67,6 +68,10 @@ enum Cmd {
 impl Cmd {
     fn parser<'src>() -> impl Parser<'src, &'src str, Cmd> {
         let env = just("!env").padded().map(|_| Cmd::Env);
+        let factor = just("!factor ")
+            .then(Expr::parser())
+            .map(|(_, e)| Cmd::Factor(e));
+        let env = env.or(factor);
 
         #[cfg(feature = "petgraph")]
         {
@@ -117,6 +122,10 @@ fn handle_line<'cfg, 'src>(line: String, env: &mut Env<'cfg>, rl: &mut Editor<()
                 Input::Cmd(Cmd::Env) => {
                     print!("{}", env);
                 }
+                Input::Cmd(Cmd::Factor(expr)) => match expr.resolve(env) {
+                    Ok(expr) => println!("{}", expr.factor()),
+                    Err(err) => println!("Error: {:?}", err),
+                },
                 #[cfg(feature = "petgraph")]
                 Input::Cmd(Cmd::Viz(expr, save)) => match expr.resolve(env) {
                     Ok(resolved) => {
