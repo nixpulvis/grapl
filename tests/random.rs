@@ -14,9 +14,36 @@ fn random_nodes_and_edges() {
     for _ in 0..ITERATIONS {
         let depth = rand::rng().random_range(0..25);
         let expr = generate_expr(25, depth, 10, 10);
+        assert_eq!(expr.graph(), expr.normalize().graph());
+    }
+}
+
+#[test]
+fn random_directed_nodes_and_edges() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_directed_expr(25, depth, 10, 10, 10);
+        assert_eq!(expr.graph(), expr.normalize().graph());
+    }
+}
+
+#[test]
+fn random_normalize_idempotent() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_directed_expr(25, depth, 10, 10, 10);
         let normalized = expr.normalize();
-        assert_eq!(expr.nodes(), normalized.nodes());
-        assert_eq!(expr.edges(), normalized.edges());
+        assert_eq!(normalized.normalize(), normalized);
+    }
+}
+
+#[test]
+fn random_transpose() {
+    for _ in 0..ITERATIONS {
+        let depth = rand::rng().random_range(0..10);
+        let expr = generate_directed_expr(25, depth, 10, 10, 10);
+        assert_eq!(expr.transpose().graph(), expr.graph().transpose());
+        assert_eq!(expr.transpose().transpose().normalize(), expr.normalize());
     }
 }
 

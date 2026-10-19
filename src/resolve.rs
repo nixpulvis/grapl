@@ -6,7 +6,7 @@
 //! recursion. See [`Config`] and [`Env`] for more information on how this is
 //! handled.
 
-use crate::{Expr, Node, Ret, Stmt};
+use crate::{Expr, Node, Program, Stmt};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -148,6 +148,7 @@ impl<'src> Resolve<'src> for Expr {
             Expr::Node(node) => Ok(env.lookup(node)),
             Expr::Connected(exprs) => inner!(exprs, Expr::Connected),
             Expr::Disconnected(exprs) => inner!(exprs, Expr::Disconnected),
+            Expr::Directed(exprs) => inner!(exprs, Expr::Directed),
         }
     }
 }
@@ -178,19 +179,19 @@ impl<'src> Resolve<'src> for Vec<Stmt> {
     }
 }
 
-impl<'src> Resolve<'src> for Ret {
+impl<'src> Resolve<'src> for Program {
     type Output = Expr;
 
     fn resolve<'cfg>(&self, env: &mut Env<'cfg>) -> Result<Self::Output, Error> {
-        self.0.resolve(env)?;
-        self.1.resolve(env)
+        self.stmts.resolve(env)?;
+        self.expr.resolve(env)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        Expr, Node, Parse, Resolve, Ret, Stmt,
+        Expr, Node, Parse, Program, Resolve, Stmt,
         resolve::{Config, Env},
     };
     use pretty_assertions::assert_eq;
@@ -264,7 +265,7 @@ mod tests {
         let mut env = Env::new(&config);
 
         assert_eq!(
-            Ret::parse(
+            Program::parse(
                 r#"
                     G = A
                     A
